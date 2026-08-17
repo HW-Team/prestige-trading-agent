@@ -1,0 +1,355 @@
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from prestige_trading_agent.agent import AgentDependencies, AgentRoute, route_message
+from prestige_trading_agent.domain import (
+    AccessStatus,
+    FormCompletion,
+    FunnelPath,
+    FunnelState,
+    NextAction,
+    OutboxKind,
+)
+from prestige_trading_agent.models import (
+    AccessRequest,
+    Contact,
+    Conversation,
+    FormSubmission,
+    Lead,
+    Message,
+    OutboxJob,
+    Subscription,
+    WebhookEvent,
+)
+
+
+class InvalidTransition(ValueError):
+    pass
+
+
+TRANSITIONS: dict[FunnelState, frozenset[FunnelState]] = {
+    FunnelState.NEW: frozenset(
+        {
+            FunnelState.QUALIFYING,
+            FunnelState.FORM_PENDING,
+            FunnelState.CHECKOUT_PENDING,
+            FunnelState.TRIAL_PENDING,
+            FunnelState.HUMAN_HANDOFF,
+            FunnelState.UNSUBSCRIBED,
+        }
+    ),
+    FunnelState.QUALIFYING: frozenset(
+        {
+            FunnelState.FORM_PENDING,
+            FunnelState.CHECKOUT_PENDING,
+            FunnelState.TRIAL_PENDING,
+            FunnelState.HUMAN_HANDOFF,
+            FunnelState.UNSUBSCRIBED,
+        }
+    ),
+    FunnelState.FORM_PENDING: frozenset(
+        {FunnelState.FORM_COMPLETED, FunnelState.HUMAN_HANDOFF, FunnelState.UNSUBSCRIBED}
+    ),
+    FunnelState.FORM_COMPLETED: frozenset(
+        {
+            FunnelState.FREE_COMMUNITY,
+            FunnelState.CHECKOUT_PENDING,
+            FunnelState.TRIAL_PENDING,
+            FunnelState.HUMAN_HANDOFF,
+        }
+    ),
+    FunnelState.FREE_COMMUNITY: frozenset(
+        {
+            FunnelState.CHECKOUT_PENDING,
+            FunnelState.TRIAL_PENDING,
+            FunnelState.HUMAN_HANDOFF,
+            FunnelState.UNSUBSCRIBED,
+        }
+    ),
+    FunnelState.CHECKOUT_PENDING: frozenset(
+        {FunnelState.PAID_ACTIVE, FunnelState.HUMAN_HANDOFF, FunnelState.UNSUBSCRIBED}
+    ),
+    FunnelState.PAID_ACTIVE: frozenset({FunnelState.HUMAN_HANDOFF, FunnelState.UNSUBSCRIBED}),
+    FunnelState.TRIAL_PENDING: frozenset(
+        {FunnelState.TRIAL_APPROVED, FunnelState.HUMAN_HANDOFF, FunnelState.UNSUBSCRIBED}
+    ),
+    FunnelState.TRIAL_APPROVED: frozenset(
+        {FunnelState.PAID_ACTIVE, FunnelState.HUMAN_HANDOFF, FunnelState.UNSUBSCRIBED}
+    ),
+    FunnelState.HUMAN_HANDOFF: frozenset({FunnelState.QUALIFYING, FunnelState.UNSUBSCRIBED}),
+    FunnelState.UNSUBSCRIBED: frozenset(),
+}
+
+
+def transition(current: FunnelState, target: FunnelState) -> FunnelState:
+    if current == target:
+        return current
+    if target not in TRANSITIONS[current]:
+        raise InvalidTransition(f"Cannot transition from {current} to {target}")
+    return target
+
+
+async def get_or_create_contact(
+    session: AsyncSession, external_id: str, email: str | None = None
+) -> Contact:
+    contact = await session.scalar(select(Contact).where(Contact.external_id == external_id))
+    if contact is None and email:
+        contact = await session.scalar(select(Contact).where(Contact.email == email))
+    if contact is None:
+        contact = Contact(external_id=external_id, email=email)
+        session.add(contact)
+        await session.flush()
+    elif email and not contact.email:
+        contact.email = email
+    return contact
+
+
+async def enqueue(
+    session: AsyncSession, kind: OutboxKind, dedupe_key: str, payload: dict[str, Any]
+) -> OutboxJob:
+    existing = await session.scalar(select(OutboxJob).where(OutboxJob.dedupe_key == dedupe_key))
+    if existing is not None:
+        return existing
+    job = OutboxJob(kind=kind, dedupe_key=dedupe_key, payload=payload)
+    session.add(job)
+    await session.flush()
+    return job
+
+
+async def ingest_message(
+    session: AsyncSession,
+    agent: Any,
+    *,
+    external_id: str,
+    message_id: str,
+    text: str,
+    source: str,
+    source_id: str,
+    channel: str = "messenger",
+) -> tuple[AgentRoute, bool]:
+    prior = await session.scalar(
+        select(Message).where(Message.channel == channel, Message.external_message_id == message_id)
+    )
+    if prior is not None:
+        return AgentRoute(reply="Event already processed.", rationale="idempotent replay"), True
+
+    contact = await get_or_create_contact(session, external_id)
+    lead = await session.scalar(
+        select(Lead).where(Lead.source == source, Lead.source_id == source_id)
+    )
+    if lead is None:
+        lead = Lead(contact_id=contact.id, source=source, source_id=source_id)
+        session.add(lead)
+        await session.flush()
+    thread_id = external_id
+    conversation = await session.scalar(
+        select(Conversation).where(
+            Conversation.channel == channel, Conversation.external_thread_id == thread_id
+        )
+    )
+    if conversation is None:
+        conversation = Conversation(
+            contact_id=contact.id, lead_id=lead.id, channel=channel, external_thread_id=thread_id
+        )
+        session.add(conversation)
+        await session.flush()
+    session.add(
+        Message(
+            conversation_id=conversation.id,
+            channel=channel,
+            external_message_id=message_id,
+            direction="inbound",
+            text=text,
+        )
+    )
+    route = await route_message(
+        agent, text, AgentDependencies(contact.id, conversation.id, conversation.state)
+    )
+    try:
+        conversation.state = transition(conversation.state, route.next_state)
+    except InvalidTransition:
+        route = AgentRoute(
+            reply="A team member will continue from here.",
+            path=route.path,
+            next_state=FunnelState.HUMAN_HANDOFF,
+            next_action=NextAction.HUMAN_HANDOFF,
+            rationale="invalid automated state transition",
+        )
+        if FunnelState.HUMAN_HANDOFF in TRANSITIONS[conversation.state]:
+            conversation.state = FunnelState.HUMAN_HANDOFF
+    lead.path = route.path
+    lead.state = conversation.state
+    if route.next_action is NextAction.CREATE_ACCESS_REQUEST:
+        existing_request = await session.scalar(
+            select(AccessRequest).where(
+                AccessRequest.contact_id == contact.id, AccessRequest.status == AccessStatus.PENDING
+            )
+        )
+        if existing_request is None:
+            session.add(AccessRequest(contact_id=contact.id))
+    if channel == "messenger":
+        await enqueue(
+            session,
+            OutboxKind.SEND_MESSAGE,
+            f"reply:{message_id}",
+            {"recipient_id": external_id, "text": route.reply},
+        )
+    return route, False
+
+
+async def complete_form(session: AsyncSession, form: FormCompletion) -> tuple[FormSubmission, bool]:
+    existing = await session.scalar(
+        select(FormSubmission).where(FormSubmission.submission_id == form.submission_id)
+    )
+    if existing is not None:
+        return existing, True
+    contact = await get_or_create_contact(
+        session, form.external_id, str(form.email) if form.email else None
+    )
+    submission = FormSubmission(
+        submission_id=form.submission_id,
+        contact_id=contact.id,
+        path=form.path,
+        payload=form.model_dump(mode="json"),
+    )
+    session.add(submission)
+
+    leads = list((await session.scalars(select(Lead).where(Lead.contact_id == contact.id))).all())
+    for lead in leads:
+        if lead.state in {FunnelState.NEW, FunnelState.QUALIFYING}:
+            lead.state = transition(lead.state, FunnelState.FORM_PENDING)
+        if lead.state is FunnelState.FORM_PENDING:
+            lead.state = transition(lead.state, FunnelState.FORM_COMPLETED)
+        target = {
+            FunnelPath.NEWBIE: FunnelState.FREE_COMMUNITY,
+            FunnelPath.COURSE: FunnelState.CHECKOUT_PENDING,
+            FunnelPath.INDICATOR: FunnelState.TRIAL_PENDING,
+        }.get(form.path)
+        if target is not None and target in TRANSITIONS[lead.state]:
+            lead.state = transition(lead.state, target)
+        lead.path = form.path
+        conversations = list(
+            (
+                await session.scalars(select(Conversation).where(Conversation.lead_id == lead.id))
+            ).all()
+        )
+        for conversation in conversations:
+            conversation.state = lead.state
+
+    if form.path is FunnelPath.NEWBIE:
+        await enqueue(
+            session,
+            OutboxKind.SEND_FREE_LINE_INVITE,
+            f"form-invite:{form.submission_id}",
+            {"recipient_id": form.external_id, "contact_id": contact.id},
+        )
+    elif form.path is FunnelPath.INDICATOR:
+        pending_request = await session.scalar(
+            select(AccessRequest).where(
+                AccessRequest.contact_id == contact.id,
+                AccessRequest.status == AccessStatus.PENDING,
+            )
+        )
+        if pending_request is None:
+            session.add(AccessRequest(contact_id=contact.id))
+    await session.flush()
+    return submission, False
+
+
+async def process_stripe_event(session: AsyncSession, event: dict[str, Any]) -> bool:
+    event_id = str(event["id"])
+    prior = await session.scalar(
+        select(WebhookEvent).where(
+            WebhookEvent.provider == "stripe", WebhookEvent.event_id == event_id
+        )
+    )
+    if prior is not None:
+        return True
+    record = WebhookEvent(provider="stripe", event_id=event_id, payload=event)
+    session.add(record)
+    if event.get("type") in {"checkout.session.completed", "invoice.paid"}:
+        obj = event["data"]["object"]
+        metadata = obj.get("metadata") or {}
+        email = (obj.get("customer_details") or {}).get("email") or obj.get("customer_email")
+        external_id = metadata.get("external_id") or email or str(obj.get("customer"))
+        contact = await get_or_create_contact(session, str(external_id), email)
+        provider_id = str(obj.get("subscription") or obj["id"])
+        subscription = await session.scalar(
+            select(Subscription).where(Subscription.provider_subscription_id == provider_id)
+        )
+        if subscription is None:
+            session.add(
+                Subscription(
+                    provider_subscription_id=provider_id,
+                    contact_id=contact.id,
+                    product=str(metadata.get("product", "course")),
+                    status="active",
+                )
+            )
+        leads = list(
+            (await session.scalars(select(Lead).where(Lead.contact_id == contact.id))).all()
+        )
+        for lead in leads:
+            if FunnelState.PAID_ACTIVE in TRANSITIONS[lead.state]:
+                lead.state = transition(lead.state, FunnelState.PAID_ACTIVE)
+                conversations = list(
+                    (
+                        await session.scalars(
+                            select(Conversation).where(Conversation.lead_id == lead.id)
+                        )
+                    ).all()
+                )
+                for conversation in conversations:
+                    conversation.state = lead.state
+        safe_payload = {
+            "contact_id": contact.id,
+            "email": contact.email,
+            "product": str(metadata.get("product", "course")),
+            "provider_id": provider_id,
+        }
+        await enqueue(session, OutboxKind.ENROLL_LMS, f"lms:{provider_id}", safe_payload)
+        await enqueue(
+            session, OutboxKind.PROVISION_PAID_ACCESS, f"paid-access:{provider_id}", safe_payload
+        )
+    record.processed_at = datetime.now(UTC)
+    await session.flush()
+    return False
+
+
+async def approve_access(
+    session: AsyncSession, request_id: str, reviewer: str, note: str | None
+) -> AccessRequest | None:
+    item = await session.get(AccessRequest, request_id)
+    if item is None:
+        return None
+    if item.status is not AccessStatus.PENDING:
+        raise InvalidTransition("Access request has already been reviewed")
+    item.status = AccessStatus.APPROVED
+    item.reviewed_by = reviewer
+    item.review_note = note
+    item.reviewed_at = datetime.now(UTC)
+    leads = list(
+        (await session.scalars(select(Lead).where(Lead.contact_id == item.contact_id))).all()
+    )
+    for lead in leads:
+        if FunnelState.TRIAL_APPROVED in TRANSITIONS[lead.state]:
+            lead.state = transition(lead.state, FunnelState.TRIAL_APPROVED)
+            conversations = list(
+                (
+                    await session.scalars(
+                        select(Conversation).where(Conversation.lead_id == lead.id)
+                    )
+                ).all()
+            )
+            for conversation in conversations:
+                conversation.state = lead.state
+    await enqueue(
+        session,
+        OutboxKind.NOTIFY_ACCESS_APPROVED,
+        f"approval:{item.id}",
+        {"contact_id": item.contact_id, "access_request_id": item.id},
+    )
+    return item
