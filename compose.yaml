@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: prestige
+      POSTGRES_PASSWORD: prestige
+      POSTGRES_DB: prestige
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prestige"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  app:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      PRESTIGE_ENVIRONMENT: production
+      PRESTIGE_DATABASE_URL: postgresql+asyncpg://prestige:prestige@db/prestige
+      PRESTIGE_MODEL: test
+      PRESTIGE_OUTBOUND_MODE: recording
+      PRESTIGE_ADMIN_API_KEY: change-me
+      PRESTIGE_META_VERIFY_TOKEN: change-me
+      PRESTIGE_META_APP_SECRET: change-me
+      PRESTIGE_FORM_WEBHOOK_SECRET: change-me
+      PRESTIGE_STRIPE_WEBHOOK_SECRET: change-me
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "alembic upgrade head && uvicorn prestige_trading_agent.main:app --host 0.0.0.0 --port 8000"]
+volumes:
+  postgres_data:
