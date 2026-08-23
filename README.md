@@ -51,6 +51,18 @@ uv run mypy src
 
 OpenAPI is at `http://localhost:8000/docs`.
 
+## DCTS static sales page
+
+The isolated production artifact lives at [`web/dcts-sales-page/`](web/dcts-sales-page/). It is configuration-ready but intentionally unconfigured: checkout, VSL, support, policy, business, and evidence values remain pending approval, and the visible `3,990 THB` price remains provisional. The checked-in state cannot collect payment.
+
+Validate it with:
+
+```bash
+python3 web/dcts-sales-page/scripts/validate.py
+```
+
+Public deploy-time URLs belong only in `web/dcts-sales-page/config.js`; browser code must never contain secrets or private access links. See the page-level README for the URL allowlist, local server, browser QA, and deployment checklist.
+
 ## Configuration
 
 All variables use the `PRESTIGE_` prefix. See `.env.example` for the full list.
