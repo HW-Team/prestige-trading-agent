@@ -21,7 +21,13 @@ from prestige_trading_agent.agent import AgentRoute, build_agent
 from prestige_trading_agent.config import Settings, get_settings
 from prestige_trading_agent.db import Database
 from prestige_trading_agent.domain import ApprovalRequest, ChatRequest, FormCompletion
-from prestige_trading_agent.models import AccessRequest, Lead, OutboxJob
+from prestige_trading_agent.models import (
+    AccessRequest,
+    Conversation,
+    Lead,
+    Message,
+    OutboxJob,
+)
 from prestige_trading_agent.services import (
     InvalidTransition,
     approve_access,
@@ -242,6 +248,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             (await session.scalars(select(AccessRequest).order_by(AccessRequest.created_at))).all()
         )
         return jsonable_encoder(items)
+
+    @app.get("/admin/messages", dependencies=[Depends(require_admin)])
+    async def list_messages(
+        session: AsyncSession = Depends(session_dependency),
+        limit: int = Query(default=200, le=1000),
+    ) -> list[dict[str, Any]]:
+        rows = (
+            await session.scalars(select(Message).order_by(Message.created_at.desc()).limit(limit))
+        ).all()
+        conversation_ids = {r.conversation_id for r in rows}
+        conversations = {
+            c.id: c
+            for c in await session.scalars(
+                select(Conversation).where(Conversation.id.in_(conversation_ids))
+            )
+        }
+        return [
+            {
+                "id": r.id,
+                "conversation_id": r.conversation_id,
+                "conversation": {
+                    "id": r.conversation_id,
+                    "external_thread_id": conversations[r.conversation_id].external_thread_id,
+                },
+                "direction": r.direction,
+                "text": r.text,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ]
 
     @app.post("/admin/access-requests/{request_id}/approve", dependencies=[Depends(require_admin)])
     async def approve_access_request(

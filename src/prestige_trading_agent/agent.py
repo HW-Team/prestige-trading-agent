@@ -19,6 +19,10 @@ class AgentDependencies:
     contact_id: str
     conversation_id: str
     current_state: FunnelState = FunnelState.NEW
+    # Prior turns as (role, text) — role is "user" or "assistant". Lets the
+    # live model see the conversation so it does not restart with a greeting
+    # on later turns. Newest message last.
+    history: tuple[tuple[str, str], ...] = ()
 
 
 class AgentRoute(BaseModel):
@@ -68,7 +72,13 @@ def build_agent(
 
     @agent.instructions
     def state_context(ctx: RunContext[AgentDependencies]) -> str:
-        return f"Current state: {ctx.deps.current_state}; contact: {ctx.deps.contact_id}"
+        parts = [f"Current state: {ctx.deps.current_state}; contact: {ctx.deps.contact_id}"]
+        if ctx.deps.history:
+            transcript = "\n".join(
+                f"{'ลูกค้า' if role == 'user' else 'AI'}: {text}" for role, text in ctx.deps.history
+            )
+            parts.append(f"บทสนทนาก่อนหน้า:\n{transcript}")
+        return "\n".join(parts)
 
     return agent
 

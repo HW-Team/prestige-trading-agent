@@ -164,6 +164,21 @@ async def ingest_message(
         )
         session.add(conversation)
         await session.flush()
+    # Load prior turns (exclude this message; it is added below) so the live
+    # model has conversation context instead of restarting each turn.
+    prior_rows = (
+        await session.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation.id,
+                Message.direction.in_(("inbound", "outbound")),
+            )
+            .order_by(Message.created_at, Message.id)
+        )
+    ).all()
+    history = tuple(
+        ("user" if m.direction == "inbound" else "assistant", m.text) for m in prior_rows
+    )
     session.add(
         Message(
             conversation_id=conversation.id,
@@ -174,7 +189,9 @@ async def ingest_message(
         )
     )
     route = await route_message(
-        agent, text, AgentDependencies(contact.id, conversation.id, conversation.state)
+        agent,
+        text,
+        AgentDependencies(contact.id, conversation.id, conversation.state, history),
     )
     try:
         conversation.state = transition(conversation.state, route.next_state)
@@ -190,6 +207,16 @@ async def ingest_message(
         )
         if FunnelState.HUMAN_HANDOFF in TRANSITIONS[conversation.state]:
             conversation.state = FunnelState.HUMAN_HANDOFF
+    # Persist the bot reply so it appears in the next turn's history.
+    session.add(
+        Message(
+            conversation_id=conversation.id,
+            channel=channel,
+            external_message_id=f"reply:{message_id}",
+            direction="outbound",
+            text=route.reply,
+        )
+    )
     lead.path = route.path
     lead.state = conversation.state
     if route.next_action is NextAction.CREATE_ACCESS_REQUEST:

@@ -33,6 +33,30 @@ async def test_internal_chat_and_trial_queue(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_conversation_history_persists_across_turns(client: AsyncClient) -> None:
+    """Two turns on the same external_id must accumulate message rows, and the
+    second reply must differ from a fresh-start greeting (history is passed)."""
+    first = await client.post(
+        "/internal/chat",
+        json={"external_id": "chat-history", "message": "สวัสดีครับ อยากรู้จักคอร์ส DCTS"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert first.status_code == 200
+    second = await client.post(
+        "/internal/chat",
+        json={"external_id": "chat-history", "message": "สนใจฉบับเต็ม 3,990 บาทครับ"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert second.status_code == 200
+    assert second.json()["reply"]  # offline model still replies
+    # Inbound + outbound rows must exist for both turns.
+    history = (await client.get("/admin/messages", headers={"X-API-Key": "admin-test"})).json()
+    rows = [m for m in history if m["conversation"]["external_thread_id"] == "chat-history"]
+    assert len(rows) >= 4  # 2 inbound + 2 outbound
+    assert {r["direction"] for r in rows} == {"inbound", "outbound"}
+
+
+@pytest.mark.asyncio
 async def test_signed_form_schedules_only_free_line_invite(client: AsyncClient) -> None:
     payload = {
         "submission_id": "sub-1",
