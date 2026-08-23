@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
@@ -5,6 +6,12 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.test import TestModel
 
 from prestige_trading_agent.domain import FunnelPath, FunnelState, NextAction
+from prestige_trading_agent.knowledge import (
+    APPROVED_URL_PREFIXES,
+    FORBIDDEN_CLAIMS,
+    SCENARIOS,
+    build_system_prompt,
+)
 
 
 @dataclass
@@ -22,12 +29,7 @@ class AgentRoute(BaseModel):
     rationale: str = ""
 
 
-SYSTEM_PROMPT = """You are Prestige Trading's funnel assistant. Classify intent into newbie,
-course, or indicator and provide concise educational help. Never promise financial returns, give
-personalized financial advice, or reveal a paid LINE room invite. Newbies receive a form; course
-prospects receive checkout; indicator trials create a manual approval request.
-Return structured data.
-"""
+SYSTEM_PROMPT = build_system_prompt()
 
 
 def build_agent(model: str) -> Agent[AgentDependencies, AgentRoute]:
@@ -45,16 +47,20 @@ def build_agent(model: str) -> Agent[AgentDependencies, AgentRoute]:
 
 def apply_safety_rules(route: AgentRoute) -> AgentRoute:
     text = route.reply.lower()
-    forbidden = ("guaranteed", "guarantee", "no risk", "paid-secret", "paid room")
-    unsafe_link = "line.me" in text and route.next_action is not NextAction.SEND_FREE_LINE_INVITE
-    if (
-        any(term in text for term in forbidden)
-        or unsafe_link
-        or route.next_action is NextAction.SEND_PAID_ROOM
-    ):
+    # Financial promises / guarantee claims are forbidden in any form.
+    unsafe_claim = any(term.lower() in text for term in FORBIDDEN_CLAIMS)
+    # URL policy: the only links allowed are the approved public ones
+    # (LINE OA lin.ee/WcilwHP + bravotradeacademy.com). Any other http link —
+    # especially a lin.ee / line.me paid room invite — triggers a handoff.
+    urls = re.findall(r"https?://[^\s)\]]+", route.reply, flags=re.IGNORECASE)
+    # Case-insensitive whitelist match (lin.ee paths are case-sensitive).
+    allowed = tuple(p.lower() for p in APPROVED_URL_PREFIXES)
+    unsafe_url = any(not url.lower().startswith(allowed) for url in urls)
+    if unsafe_claim or unsafe_url or route.next_action is NextAction.SEND_PAID_ROOM:
         return AgentRoute(
             reply=(
-                "I can provide general education only. A team member will help with access safely."
+                "ขออภัยครับ ข้อมูลนี้อยู่นอกเหนือขอบเขตที่ผมให้บริการได้ "
+                "ขออนุญาตประสานงานให้เจ้าหน้าที่แอดมินเข้ามาดูแลโดยเร็วที่สุดครับ"
             ),
             path=route.path,
             next_state=FunnelState.HUMAN_HANDOFF,
@@ -66,25 +72,39 @@ def apply_safety_rules(route: AgentRoute) -> AgentRoute:
 
 def _offline_route(prompt: str) -> AgentRoute:
     lower = prompt.lower()
-    if "indicator" in lower or "tradingview" in lower or "trial" in lower:
+    if "indicator" in lower or "tradingview" in lower or "ทดลอง" in lower or "trial" in lower:
         return AgentRoute(
-            reply="I can place your free indicator trial request into our approval queue.",
+            reply=SCENARIOS["indicator_trial"]["reply"],
             path=FunnelPath.INDICATOR,
             next_state=FunnelState.TRIAL_PENDING,
             next_action=NextAction.CREATE_ACCESS_REQUEST,
+            rationale="indicator trial intent",
         )
-    if "course" in lower or "checkout" in lower or "learn" in lower:
+    if "course" in lower or "checkout" in lower or "คอร์ส" in lower or "learn" in lower:
         return AgentRoute(
-            reply="I can share the course checkout when you are ready.",
+            reply=SCENARIOS["course_interest"]["reply"],
             path=FunnelPath.COURSE,
             next_state=FunnelState.CHECKOUT_PENDING,
             next_action=NextAction.SEND_CHECKOUT,
+            rationale="course intent",
+        )
+    if "มือใหม่" in lower or "beginner" in lower or "เริ่ม" in lower or "newbie" in lower:
+        return AgentRoute(
+            reply=SCENARIOS["newbie_start"]["reply"],
+            path=FunnelPath.NEWBIE,
+            next_state=FunnelState.FORM_PENDING,
+            next_action=NextAction.SEND_FORM,
+            rationale="newbie intent",
         )
     return AgentRoute(
-        reply="Welcome! Complete the free form and I will send the free community invite here.",
-        path=FunnelPath.NEWBIE,
-        next_state=FunnelState.FORM_PENDING,
-        next_action=NextAction.SEND_FORM,
+        reply=(
+            "สวัสดีครับ ยินดีให้คำแนะนำเกี่ยวกับระบบ DCTS ค่ะ/ครับ "
+            "ไม่ทราบว่าท่านสนใจรายละเอียดคอร์สเรียน หรือต้องการปรึกษาแนวทางการเทรดครับ?"
+        ),
+        path=FunnelPath.UNKNOWN,
+        next_state=FunnelState.QUALIFYING,
+        next_action=NextAction.NONE,
+        rationale="ambiguous intent",
     )
 
 
