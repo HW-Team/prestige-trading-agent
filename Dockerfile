@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 WORKDIR /app
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --chown=appuser:appuser src ./src
+COPY --chown=appuser:appuser web ./web
 COPY --chown=appuser:appuser migrations ./migrations
 COPY --chown=appuser:appuser alembic.ini ./
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
