@@ -1,5 +1,42 @@
-from prestige_trading_agent.agent import AgentRoute, apply_safety_rules
+from prestige_trading_agent.agent import AgentRoute, _route_with_fallback, apply_safety_rules
 from prestige_trading_agent.domain import FunnelPath, FunnelState, NextAction
+
+
+def test_route_fallback_fills_state_and_action_from_path() -> None:
+    route = AgentRoute(
+        reply="ทดลอง Indicator ได้ครับ",
+        path=FunnelPath.INDICATOR,
+        next_state=FunnelState.QUALIFYING,
+        next_action=NextAction.NONE,
+    )
+    fixed = _route_with_fallback(route, FunnelState.NEW)
+    assert fixed.next_state is FunnelState.TRIAL_PENDING
+    assert fixed.next_action is NextAction.CREATE_ACCESS_REQUEST
+
+
+def test_route_fallback_keeps_current_state_when_target_unreachable() -> None:
+    # Mid-checkout prospect asks a beginner question: must NOT regress to form.
+    route = AgentRoute(
+        reply="มือใหม่เรียนได้ครับ",
+        path=FunnelPath.NEWBIE,
+        next_state=FunnelState.QUALIFYING,
+        next_action=NextAction.NONE,
+    )
+    fixed = _route_with_fallback(route, FunnelState.CHECKOUT_PENDING)
+    assert fixed.next_state is FunnelState.CHECKOUT_PENDING
+    assert fixed.next_action is NextAction.NONE
+
+
+def test_route_fallback_does_not_override_explicit_handoff() -> None:
+    route = AgentRoute(
+        reply="ส่งต่อแอดมิน",
+        path=FunnelPath.COURSE,
+        next_state=FunnelState.HUMAN_HANDOFF,
+        next_action=NextAction.HUMAN_HANDOFF,
+    )
+    fixed = _route_with_fallback(route, FunnelState.NEW)
+    assert fixed.next_state is FunnelState.HUMAN_HANDOFF
+    assert fixed.next_action is NextAction.HUMAN_HANDOFF
 
 
 def test_paid_room_link_is_never_returned() -> None:

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     form_webhook_secret: SecretStr = SecretStr("change-me")
     stripe_webhook_secret: SecretStr = SecretStr("change-me")
     model: str = "test"
+    model_base_url: str | None = None
+    model_api_key: SecretStr | None = None
     outbound_mode: Literal["recording", "live"] = "recording"
     free_line_invite_url: str = "https://lin.ee/WcilwHP"
     newbie_form_url: str = (

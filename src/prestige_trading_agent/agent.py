@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, ModelSettings, RunContext
 from pydantic_ai.models.test import TestModel
 
 from prestige_trading_agent.domain import FunnelPath, FunnelState, NextAction
@@ -32,8 +32,36 @@ class AgentRoute(BaseModel):
 SYSTEM_PROMPT = build_system_prompt()
 
 
-def build_agent(model: str) -> Agent[AgentDependencies, AgentRoute]:
-    selected: str | TestModel = TestModel() if model == "test" else model
+def build_agent(
+    model: str,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> Agent[AgentDependencies, AgentRoute]:
+    """Build the funnel agent.
+
+    ``model == "test"`` uses the offline deterministic model. Otherwise a live
+    OpenAI-compatible endpoint is wired (e.g. DeepSeek) when ``base_url`` and
+    ``api_key`` are provided; a bare model name falls back to pydantic-ai's
+    default provider resolution.
+    """
+    if model == "test":
+        selected: str | TestModel = TestModel()
+    elif base_url and api_key:
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        selected = OpenAIChatModel(
+            model,
+            provider=OpenAIProvider(base_url=base_url, api_key=api_key),
+            settings=ModelSettings(
+                # DeepSeek's thinking mode rejects tool_choice used for
+                # structured output; disable it so AgentRoute parsing works.
+                extra_body={"thinking": {"type": "disabled"}},
+            ),
+        )
+    else:
+        selected = model
     agent: Agent[AgentDependencies, AgentRoute] = Agent(
         selected, deps_type=AgentDependencies, output_type=AgentRoute, system_prompt=SYSTEM_PROMPT
     )
@@ -108,10 +136,66 @@ def _offline_route(prompt: str) -> AgentRoute:
     )
 
 
+def _default_route_for(path: FunnelPath) -> tuple[FunnelState, NextAction]:
+    """Deterministic funnel progression for a classified path.
+
+    Mirrors the offline router so the live model's free-form reply never
+    drifts the state machine: path classification drives the canonical
+    first state/action; the model supplies the reply text.
+    """
+    if path is FunnelPath.INDICATOR:
+        return FunnelState.TRIAL_PENDING, NextAction.CREATE_ACCESS_REQUEST
+    if path is FunnelPath.COURSE:
+        return FunnelState.CHECKOUT_PENDING, NextAction.SEND_CHECKOUT
+    if path is FunnelPath.NEWBIE:
+        return FunnelState.FORM_PENDING, NextAction.SEND_FORM
+    return FunnelState.QUALIFYING, NextAction.NONE
+
+
+def _route_with_fallback(route: AgentRoute, current_state: FunnelState) -> AgentRoute:
+    """Fill state/action from the classified path when the model left them at
+    the default (qualifying/none) — keeps the funnel deterministic while the
+    model composes the reply.
+
+    The target state is only applied when it is reachable from the current
+    state (mirrors the services transition map); otherwise the current state
+    is kept so an informational question mid-funnel never regresses or
+    strands the prospect.
+    """
+    if route.next_action is NextAction.NONE and route.next_state in {
+        FunnelState.QUALIFYING,
+        FunnelState.NEW,
+    }:
+        state, action = _default_route_for(route.path)
+        if state in {FunnelState.QUALIFYING}:
+            route.next_state = current_state
+        elif (
+            current_state
+            in {
+                FunnelState.NEW,
+                FunnelState.QUALIFYING,
+                FunnelState.FORM_COMPLETED,
+                FunnelState.FREE_COMMUNITY,
+                FunnelState.HUMAN_HANDOFF,
+            }
+            or state is current_state
+        ):
+            # Reachable funnel entry/advance (FORM_COMPLETED/FREE_COMMUNITY can
+            # go to checkout/trial; NEW/QUALIFYING can start any path).
+            route.next_state = state
+            route.next_action = action
+        else:
+            # Mid-funnel (FORM_PENDING / CHECKOUT_PENDING / TRIAL_PENDING /
+            # PAID_ACTIVE): keep current state, don't regress.
+            route.next_state = current_state
+        route.rationale = f"{route.rationale}; deterministic path routing".strip("; ")
+    return route
+
+
 async def route_message(
     agent: Agent[AgentDependencies, AgentRoute], prompt: str, deps: AgentDependencies
 ) -> AgentRoute:
     if isinstance(agent.model, TestModel):
         return apply_safety_rules(_offline_route(prompt))
     result = await agent.run(prompt, deps=deps)
-    return apply_safety_rules(result.output)
+    return apply_safety_rules(_route_with_fallback(result.output, deps.current_state))

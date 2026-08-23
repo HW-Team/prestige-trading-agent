@@ -51,7 +51,15 @@ TRANSITIONS: dict[FunnelState, frozenset[FunnelState]] = {
         }
     ),
     FunnelState.FORM_PENDING: frozenset(
-        {FunnelState.FORM_COMPLETED, FunnelState.HUMAN_HANDOFF, FunnelState.UNSUBSCRIBED}
+        {
+            FunnelState.FORM_COMPLETED,
+            # Customer may express package interest straight from the newbie
+            # form (approved doc Scenario A: แนะนำแพ็กเกจ → ลูกค้าเลือก → checkout).
+            FunnelState.CHECKOUT_PENDING,
+            FunnelState.TRIAL_PENDING,
+            FunnelState.HUMAN_HANDOFF,
+            FunnelState.UNSUBSCRIBED,
+        }
     ),
     FunnelState.FORM_COMPLETED: frozenset(
         {
@@ -172,7 +180,9 @@ async def ingest_message(
         conversation.state = transition(conversation.state, route.next_state)
     except InvalidTransition:
         route = AgentRoute(
-            reply="A team member will continue from here.",
+            reply=(
+                "ขออภัยครับ ข้อมูลส่วนนี้ขออนุญาตส่งต่อให้เจ้าหน้าที่แอดมินดูแลให้ครับ เพื่อความถูกต้องและปลอดภัยของท่าน"
+            ),
             path=route.path,
             next_state=FunnelState.HUMAN_HANDOFF,
             next_action=NextAction.HUMAN_HANDOFF,

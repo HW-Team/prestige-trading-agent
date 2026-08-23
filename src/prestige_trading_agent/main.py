@@ -3,6 +3,7 @@ import hmac
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -40,7 +41,11 @@ def _verify_hmac(secret: str, body: bytes, supplied: str, prefix: str = "") -> b
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or get_settings()
     database = Database(config.database_url)
-    agent = build_agent(config.model)
+    agent = build_agent(
+        config.model,
+        base_url=config.model_base_url,
+        api_key=config.model_api_key.get_secret_value() if config.model_api_key else None,
+    )
     adapter = RecordingAdapter() if config.outbound_mode == "recording" else LiveAdapter(config)
 
     @asynccontextmanager
@@ -79,6 +84,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def ready(session: AsyncSession = Depends(session_dependency)) -> dict[str, str]:
         await session.execute(text("SELECT 1"))
         return {"status": "ready"}
+
+    @app.get("/test", include_in_schema=False)
+    async def test_console() -> Response:
+        """Dev-only chat test console (serves the HTML with the admin key injected)."""
+        if config.environment == "production":
+            raise HTTPException(status_code=404, detail="Not found in production")
+        html = (
+            Path(__file__).resolve().parent.parent.parent
+            / "web"
+            / "agent-test-console"
+            / "index.html"
+        ).read_text(encoding="utf-8")
+        injected = html.replace(
+            "const API_KEY = null;",
+            f"const API_KEY = {json.dumps(config.admin_api_key.get_secret_value())};",
+        )
+        return Response(content=injected, media_type="text/html")
 
     @app.post("/internal/chat", response_model=AgentRoute, dependencies=[Depends(require_admin)])
     async def internal_chat(
