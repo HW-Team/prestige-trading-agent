@@ -57,6 +57,43 @@ async def test_conversation_history_persists_across_turns(client: AsyncClient) -
 
 
 @pytest.mark.asyncio
+async def test_feedback_capture_and_list(client: AsyncClient) -> None:
+    # Send a chat, grab the reply message id, then rate it.
+    chat_resp = await client.post(
+        "/internal/chat",
+        json={"external_id": "chat-fb", "message": "สวัสดีครับ สนใจคอร์ส"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert chat_resp.status_code == 200
+    message_id = chat_resp.json()["reply_message_id"]
+    assert message_id
+
+    submit = await client.post(
+        "/internal/feedback",
+        json={"message_id": message_id, "rating": "needs_work", "comment": "ควรตอบสั้นกว่านี้"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert submit.status_code == 200
+    assert submit.json()["status"] == "recorded"
+
+    rows = (await client.get("/admin/feedback", headers={"X-API-Key": "admin-test"})).json()
+    mine = [r for r in rows if r["id"] and r["message"]["id"] == message_id]
+    assert len(mine) == 1
+    assert mine[0]["rating"] == "needs_work"
+    assert mine[0]["comment"] == "ควรตอบสั้นกว่านี้"
+
+
+@pytest.mark.asyncio
+async def test_feedback_requires_existing_message(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/internal/feedback",
+        json={"message_id": "no-such-id", "rating": "good"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_signed_form_schedules_only_free_line_invite(client: AsyncClient) -> None:
     payload = {
         "submission_id": "sub-1",

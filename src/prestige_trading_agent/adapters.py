@@ -32,6 +32,25 @@ class LiveAdapter:
         self.settings = settings
         self.client = client or httpx.AsyncClient(timeout=15)
 
+    async def notify_feedback(self, text: str) -> bool:
+        """Best-effort push of tester feedback to the configured Telegram chat.
+
+        Returns False (never raises) when Telegram is not configured or the
+        push fails — feedback capture must not depend on the notification.
+        """
+        token = self.settings.telegram_bot_token
+        chat_id = self.settings.telegram_chat_id
+        if token is None or not chat_id:
+            return False
+        try:
+            response = await self.client.post(
+                f"https://api.telegram.org/bot{token.get_secret_value()}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
+
     async def _send_meta(self, recipient_id: str, text: str) -> None:
         token = self.settings.meta_page_access_token
         if token is None:

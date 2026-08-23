@@ -137,12 +137,16 @@ async def ingest_message(
     source: str,
     source_id: str,
     channel: str = "messenger",
-) -> tuple[AgentRoute, bool]:
+) -> tuple[AgentRoute, bool, str | None]:
     prior = await session.scalar(
         select(Message).where(Message.channel == channel, Message.external_message_id == message_id)
     )
     if prior is not None:
-        return AgentRoute(reply="Event already processed.", rationale="idempotent replay"), True
+        return (
+            AgentRoute(reply="Event already processed.", rationale="idempotent replay"),
+            True,
+            None,
+        )
 
     contact = await get_or_create_contact(session, external_id)
     lead = await session.scalar(
@@ -208,15 +212,16 @@ async def ingest_message(
         if FunnelState.HUMAN_HANDOFF in TRANSITIONS[conversation.state]:
             conversation.state = FunnelState.HUMAN_HANDOFF
     # Persist the bot reply so it appears in the next turn's history.
-    session.add(
-        Message(
-            conversation_id=conversation.id,
-            channel=channel,
-            external_message_id=f"reply:{message_id}",
-            direction="outbound",
-            text=route.reply,
-        )
+    outbound = Message(
+        conversation_id=conversation.id,
+        channel=channel,
+        external_message_id=f"reply:{message_id}",
+        direction="outbound",
+        text=route.reply,
     )
+    session.add(outbound)
+    await session.flush()
+    outbound_id = outbound.id
     lead.path = route.path
     lead.state = conversation.state
     if route.next_action is NextAction.CREATE_ACCESS_REQUEST:
@@ -234,7 +239,7 @@ async def ingest_message(
             f"reply:{message_id}",
             {"recipient_id": external_id, "text": route.reply},
         )
-    return route, False
+    return route, False, outbound_id
 
 
 async def complete_form(session: AsyncSession, form: FormCompletion) -> tuple[FormSubmission, bool]:

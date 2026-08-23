@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     support_line_oa: str = "@prestigeclub"
     privacy_policy_url: str = "https://www.bravotradeacademy.com/privacy-policy"
     terms_of_service_url: str = "https://www.bravotradeacademy.com/terms-of-service"
+    # Optional: push tester feedback to a Telegram chat (e.g. the HW Team
+    # channel) the moment it is captured, so the agent operator can act on it.
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str | None = None
 
 
 @lru_cache

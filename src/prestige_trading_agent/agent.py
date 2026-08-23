@@ -31,6 +31,9 @@ class AgentRoute(BaseModel):
     next_state: FunnelState = FunnelState.QUALIFYING
     next_action: NextAction = NextAction.NONE
     rationale: str = ""
+    # Set server-side after ingest so the test console can attach feedback to
+    # the exact reply message; never produced by the model.
+    reply_message_id: str | None = None
 
 
 SYSTEM_PROMPT = build_system_prompt()

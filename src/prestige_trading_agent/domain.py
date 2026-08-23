@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -65,6 +65,13 @@ class FormCompletion(BaseModel):
 class ApprovalRequest(BaseModel):
     reviewed_by: str = Field(min_length=1, max_length=255)
     note: str | None = None
+
+
+class FeedbackCreate(BaseModel):
+    message_id: str = Field(min_length=1, max_length=36)
+    rating: Literal["good", "bad", "needs_work"]
+    comment: str | None = Field(default=None, max_length=2000)
+    tester: str | None = Field(default=None, max_length=255)
 
 
 class ORMResponse(BaseModel):

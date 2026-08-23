@@ -20,10 +20,16 @@ from prestige_trading_agent.adapters import LiveAdapter, RecordingAdapter
 from prestige_trading_agent.agent import AgentRoute, build_agent
 from prestige_trading_agent.config import Settings, get_settings
 from prestige_trading_agent.db import Database
-from prestige_trading_agent.domain import ApprovalRequest, ChatRequest, FormCompletion
+from prestige_trading_agent.domain import (
+    ApprovalRequest,
+    ChatRequest,
+    FeedbackCreate,
+    FormCompletion,
+)
 from prestige_trading_agent.models import (
     AccessRequest,
     Conversation,
+    Feedback,
     Lead,
     Message,
     OutboxJob,
@@ -112,7 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def internal_chat(
         payload: ChatRequest, session: AsyncSession = Depends(session_dependency)
     ) -> AgentRoute:
-        route, _ = await ingest_message(
+        route, _, reply_message_id = await ingest_message(
             session,
             agent,
             external_id=payload.external_id,
@@ -122,6 +128,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source_id=payload.external_id,
             channel="internal",
         )
+        # Attach the persisted reply id so the test console can capture
+        # feedback against the exact message (kept out of AgentRoute schema).
+        if reply_message_id is not None:
+            route.reply_message_id = reply_message_id
         return route
 
     @app.get("/webhooks/meta")
@@ -164,7 +174,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 message_id = str(message.get("mid", ""))
                 if not sender or not message_id or message.get("is_echo"):
                     continue
-                _, duplicate = await ingest_message(
+                _, duplicate, _ = await ingest_message(
                     session,
                     agent,
                     external_id=sender,
@@ -183,7 +193,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if not leadgen_id:
                     continue
                 external_id = f"leadgen:{leadgen_id}"
-                _, duplicate = await ingest_message(
+                _, duplicate, _ = await ingest_message(
                     session,
                     agent,
                     external_id=external_id,
@@ -275,6 +285,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "direction": r.direction,
                 "text": r.text,
                 "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ]
+
+    @app.post("/internal/feedback", dependencies=[Depends(require_admin)])
+    async def submit_feedback(
+        payload: FeedbackCreate, session: AsyncSession = Depends(session_dependency)
+    ) -> dict[str, str]:
+        message = await session.get(Message, payload.message_id)
+        if message is None:
+            raise HTTPException(status_code=404, detail="Message not found")
+        session.add(
+            Feedback(
+                message_id=message.id,
+                rating=payload.rating,
+                comment=payload.comment,
+                tester=payload.tester,
+            )
+        )
+        await session.flush()
+        # Fire-and-forget Telegram push so the operator can act on feedback
+        # immediately; never blocks or fails the capture.
+        if isinstance(adapter, LiveAdapter):
+            rating_label = {
+                "good": "👍 ดี",
+                "bad": "👎 แก้ไข",
+                "needs_work": "👎 ต้องปรับ",
+            }.get(payload.rating, payload.rating)
+            lines = [
+                "📝 **Prestige Agent — Feedback ใหม่**",
+                f"คะแนน: {rating_label}",
+                f"AI ตอบ: {message.text[:220]}",
+            ]
+            if payload.comment:
+                lines.append(f"ความคิดเห็น: {payload.comment}")
+            if payload.tester:
+                lines.append(f"ผู้ทดสอบ: {payload.tester}")
+            lines.append(f"message_id: `{message.id}`")
+            await adapter.notify_feedback("\n".join(lines))
+        return {"status": "recorded"}
+
+    @app.get("/admin/feedback", dependencies=[Depends(require_admin)])
+    async def list_feedback(
+        session: AsyncSession = Depends(session_dependency),
+        limit: int = Query(default=200, le=1000),
+    ) -> list[dict[str, Any]]:
+        rows = (
+            await session.scalars(
+                select(Feedback).order_by(Feedback.created_at.desc()).limit(limit)
+            )
+        ).all()
+        message_ids = {r.message_id for r in rows}
+        messages = {
+            m.id: m
+            for m in await session.scalars(select(Message).where(Message.id.in_(message_ids)))
+        }
+        conversation_ids = {m.conversation_id for m in messages.values()}
+        conversations = {
+            c.id: c
+            for c in await session.scalars(
+                select(Conversation).where(Conversation.id.in_(conversation_ids))
+            )
+        }
+        return [
+            {
+                "id": r.id,
+                "rating": r.rating,
+                "comment": r.comment,
+                "tester": r.tester,
+                "created_at": r.created_at.isoformat(),
+                "message": {
+                    "id": r.message_id,
+                    "text": messages[r.message_id].text,
+                    "direction": messages[r.message_id].direction,
+                    "conversation_id": messages[r.message_id].conversation_id,
+                    "external_thread_id": conversations[
+                        messages[r.message_id].conversation_id
+                    ].external_thread_id,
+                },
             }
             for r in rows
         ]
