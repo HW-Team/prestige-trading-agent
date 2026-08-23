@@ -6,7 +6,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim-bookworm
-RUN useradd --create-home --uid 10001 appuser
+RUN useradd --create-home --uid 10001 appuser && mkdir -p /data && chown appuser:appuser /data
 WORKDIR /app
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --chown=appuser:appuser src ./src
