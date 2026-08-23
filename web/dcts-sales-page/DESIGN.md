@@ -102,6 +102,8 @@ Use Trirong for editorial Thai headings, Sarabun for Thai body copy, Montserrat 
 
 ## Elevation & Depth
 
+- Campaign imagery and the DCTS emblem are generated through Higgsfield under a controlled no-claims brief, then self-hosted as optimized SVG/WebP assets.
+- The generated emblem is decorative branding, not evidence of results.
 - Prefer ivory hairline borders and subtle tonal separation over large drop shadows. Use restrained gold glow only around the main offer and checkout preview.
 
 ## Shapes

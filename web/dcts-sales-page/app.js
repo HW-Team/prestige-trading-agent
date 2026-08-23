@@ -208,4 +208,18 @@
       link.addEventListener("click", (event) => event.preventDefault());
     }
   });
+
+  const motionAllowed = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (motionAllowed && "IntersectionObserver" in window) {
+    const revealItems = document.querySelectorAll(".section, .principle-strip, .final-cta");
+    document.documentElement.classList.add("reveal-ready");
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-revealed");
+        revealObserver.unobserve(entry.target);
+      });
+    }, { rootMargin: "0px 0px -8%", threshold: 0.08 });
+    revealItems.forEach((item) => revealObserver.observe(item));
+  }
 })();
