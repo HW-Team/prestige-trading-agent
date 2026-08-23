@@ -88,7 +88,13 @@ let busy = false;
 const API_KEY = null; // injected server-side at /test
 
 function uuid() {
-  return "test-" + crypto.randomUUID().slice(0, 8);
+  try {
+    return "test-" + crypto.randomUUID().slice(0, 8);
+  } catch (e) {
+    // Plain-HTTP contexts have no crypto.randomUUID — fall back to a
+    // Math.random-based id (uniqueness is fine for a test console).
+    return "test-" + Math.random().toString(36).slice(2, 10);
+  }
 }
 
 function addBubble(text, who) {
