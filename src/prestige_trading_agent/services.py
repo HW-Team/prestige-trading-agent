@@ -239,10 +239,13 @@ async def ingest_message(
             f"reply:{message_id}",
             {"recipient_id": external_id, "text": route.reply, "channel": channel},
         )
-        # When the customer reaches checkout (picks a package), send the
-        # PromptPay QR image so they can pay immediately in-chat. Fires on any
-        # turn where the funnel is at checkout, deduped per customer.
+        # When the customer reaches checkout with a package chosen, send the
+        # PromptPay QR image so they can pay immediately in-chat. Only fires
+        # once we actually know which package (990/3990 in the message), so we
+        # never send a wrong-amount QR; deduped per customer+package.
         if channel in {"messenger", "line"} and (
+            "990" in text or "3,990" in text or "3990" in text
+        ) and (
             route.next_action is NextAction.SEND_CHECKOUT
             or conversation.state is FunnelState.CHECKOUT_PENDING
         ):
