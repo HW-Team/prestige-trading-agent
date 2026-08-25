@@ -239,14 +239,18 @@ async def ingest_message(
             f"reply:{message_id}",
             {"recipient_id": external_id, "text": route.reply, "channel": channel},
         )
-        # When the customer picks a package, also send the PromptPay QR image
-        # so they can pay immediately in-chat (no LINE OA hop).
-        if route.next_action is NextAction.SEND_CHECKOUT:
+        # When the customer reaches checkout (picks a package), send the
+        # PromptPay QR image so they can pay immediately in-chat. Fires on any
+        # turn where the funnel is at checkout, deduped per customer.
+        if channel in {"messenger", "line"} and (
+            route.next_action is NextAction.SEND_CHECKOUT
+            or conversation.state is FunnelState.CHECKOUT_PENDING
+        ):
             package = "3990" if "3,990" in text or "3990" in text or "เต็ม" in text else "990"
             await enqueue(
                 session,
                 OutboxKind.SEND_QR_IMAGE,
-                f"qr:{message_id}",
+                f"qr:{external_id}:{package}",
                 {"recipient_id": external_id, "channel": channel, "package": package},
             )
     return route, False, outbound_id
