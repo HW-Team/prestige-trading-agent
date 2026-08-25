@@ -397,6 +397,103 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for r in rows
         ]
 
+    @app.get("/admin/memory")
+    async def memory_viewer(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> Response:
+        """Mem0 memory viewer — Basic-auth HTML page (user: admin, pw: admin key).
+
+        Lists every memory mem0 holds, grouped by customer, with a search box.
+        Reads straight from the local Chroma store at /data/mem0.
+        """
+        if authorization is None or not authorization.startswith("Basic "):
+            return Response(
+                content="Unauthorized",
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="mem0", charset="UTF-8"'},
+            )
+        import base64
+
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            user, _, pw = decoded.partition(":")
+        except Exception:
+            return Response(content="Unauthorized", status_code=401)
+        if user != "admin" or not hmac.compare_digest(
+            pw, config.admin_api_key.get_secret_value()
+        ):
+            return Response(content="Unauthorized", status_code=401)
+
+        from prestige_trading_agent.memory import get_memory
+
+        memory = get_memory()
+        rows: list[dict[str, str]] = []
+        error = ""
+        if memory is None:
+            error = "Mem0 not initialized (no memories stored yet)."
+        else:
+            try:
+                import asyncio
+
+                def _load() -> list[dict[str, str]]:
+                    coll = memory.vector_store.collection
+                    data = coll.get(include=["documents", "metadatas"])
+                    out: list[dict[str, str]] = []
+                    for doc, meta in zip(
+                        data.get("documents", []) or [], data.get("metadatas", []) or []
+                    ):
+                        out.append(
+                            {
+                                "user": str((meta or {}).get("user_id", "?")),
+                                "memory": str(doc or ""),
+                                "updated": str((meta or {}).get("updated_at", ""))[:19],
+                            }
+                        )
+                    return out
+
+                rows = asyncio.get_event_loop().run_until_complete(asyncio.to_thread(_load))
+            except Exception as exc:
+                error = f"Failed to read mem0 store: {exc}"
+        rows.sort(key=lambda r: (r["user"], r["updated"]), reverse=True)
+
+        cards = "".join(
+            f'<div class="card"><div class="user">{r["user"]}</div>'
+            f'<div class="mem">{r["memory"]}</div>'
+            f'<div class="ts">{r["updated"]}</div></div>'
+            for r in rows
+        )
+        html = f"""<!doctype html><html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mem0 — Prestige Agent</title>
+<style>
+body{{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#f5f6f8;margin:0;padding:24px}}
+.wrap{{max-width:860px;margin:0 auto}}
+h1{{font-size:20px;color:#1a1a2e;margin:0 0 4px}}
+.sub{{color:#888;font-size:13px;margin-bottom:18px}}
+input{{width:100%;padding:12px 14px;border:1px solid #ddd;border-radius:10px;font-size:15px;box-sizing:border-box;margin-bottom:18px}}
+.card{{background:#fff;border:1px solid #e8e8ef;border-radius:12px;padding:14px 16px;margin-bottom:10px}}
+.user{{font-weight:600;font-size:13px;color:#6c5ce7;margin-bottom:6px}}
+.mem{{font-size:15px;color:#222;line-height:1.5}}
+.ts{{font-size:12px;color:#aaa;margin-top:6px}}
+.err{{background:#fdecea;color:#b33939;padding:12px;border-radius:10px;margin-bottom:16px}}
+.count{{font-size:12px;color:#aaa;margin-bottom:10px}}
+</style></head><body><div class="wrap">
+<h1>🧠 Mem0 Memory</h1><div class="sub">Cross-session customer memory — self-hosted (Chroma)</div>
+{f'<div class="err">{error}</div>' if error else ''}
+<input id="q" placeholder="ค้นหา memory หรือ customer id..." oninput="filter()">
+<div class="count" id="cnt"></div>
+<div id="list">{cards or '<div class="sub">ยังไม่มี memory — รอลูกค้าคุยกับ agent ก่อน</div>'}</div>
+</div>
+<script>
+const cards=[...document.querySelectorAll('.card')];
+function filter(){{const q=document.getElementById('q').value.toLowerCase();
+let n=0;for(const c of cards){{const hit=c.textContent.toLowerCase().includes(q);c.style.display=hit?'':'none';if(hit)n++;}}
+document.getElementById('cnt').textContent=n+'/'+cards.length;}}
+filter();
+</script></body></html>"""
+        return Response(content=html, media_type="text/html")
+
     @app.post("/internal/payment", dependencies=[Depends(require_admin)])
     async def internal_payment(
         payload: PaymentRequest, session: AsyncSession = Depends(session_dependency)
