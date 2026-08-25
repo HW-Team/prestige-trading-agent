@@ -239,23 +239,28 @@ class LiveAdapter:
     async def _send_payment_qr(self, payload: dict[str, Any]) -> None:
         """Generate a PromptPay QR via EasySlip (amount = package price) and
         send it as an image. Falls back to the static QR asset URL when
-        EasySlip isn't configured."""
+        EasySlip isn't configured or is rate-limiting (WAF 1010)."""
         recipient_id = str(payload["recipient_id"])
         channel = str(payload.get("channel", "messenger"))
         package = str(payload.get("package", "3990"))
         amount = 990.0 if package == "990" else 3990.0
 
         image_url = self.settings.payment_qr_url
-        easyslip = EasySlipAdapter(self.settings)
-        result = await easyslip.generate_qr(amount=amount)
-        if result["ok"] and result.get("image"):
-            import base64
-
-            raw = base64.b64decode(result["image"])
-            path = Path(f"/data/qr-{package}.png")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+        qr_file = Path(f"/data/qr-{package}.png")
+        if qr_file.is_file():
+            # Cached from a previous successful generation — reuse, don't hit
+            # EasySlip again (avoids WAF rate-limit churn).
             image_url = f"{self.settings.public_base_url}/assets/qr-{package}.png"
+        else:
+            easyslip = EasySlipAdapter(self.settings)
+            result = await easyslip.generate_qr(amount=amount)
+            if result["ok"] and result.get("image"):
+                import base64
+
+                raw = base64.b64decode(result["image"])
+                qr_file.parent.mkdir(parents=True, exist_ok=True)
+                qr_file.write_bytes(raw)
+                image_url = f"{self.settings.public_base_url}/assets/qr-{package}.png"
 
         if channel == "line":
             await self._send_image_line(recipient_id, image_url)
