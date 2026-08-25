@@ -206,6 +206,21 @@ class LiveAdapter:
                 str(payload["recipient_id"]),
                 f"Your free community invite: {self.settings.free_line_invite_url}",
             )
+        elif kind is OutboxKind.SEND_PAID_ROOM:
+            # Paid access = closed Facebook group. Meta deprecated the Groups
+            # member API, so we send the invite link and the customer joins;
+            # the group admin approves the join request manually.
+            link = self.settings.facebook_group_invite_url
+            msg = (
+                "ชำระเงินเรียบร้อยครับ 🎉 กรุณากรอกฟอร์มและกดเข้ากลุ่ม Facebook ปิดผ่านลิงก์นี้ "
+                f"{link} เจ้าหน้าที่จะอนุมัติภายใน 24 ชม. ครับ"
+                if link
+                else "ชำระเงินเรียบร้อยครับ 🎉 เจ้าหน้าที่จะส่งลิงก์เข้ากลุ่ม Facebook ปิดให้ภายใน 24 ชม. ครับ"
+            )
+            if str(payload.get("channel", "messenger")) == "line":
+                await self._send_line(str(payload["recipient_id"]), msg)
+            else:
+                await self._send_meta(str(payload["recipient_id"]), msg)
         elif kind is OutboxKind.ENROLL_LMS:
             if not self.settings.lms_endpoint or not self.settings.lms_api_key:
                 raise RuntimeError("LMS endpoint and API key are required for live enrollment")

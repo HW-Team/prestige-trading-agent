@@ -25,16 +25,14 @@ class Settings(BaseSettings):
     model_api_key: SecretStr | None = None
     outbound_mode: Literal["recording", "live"] = "recording"
     free_line_invite_url: str = "https://lin.ee/WcilwHP"
-    newbie_form_url: str = (
-        "https://www.bravotradeacademy.com/course/daily-cash-flow-trading-system/"
-    )
+    newbie_form_url: str = "https://prestigetradingclub.com/"
     course_checkout_url: str = "https://lin.ee/WcilwHP"
     indicator_form_url: str = "https://lin.ee/WcilwHP"
-    lms_endpoint: str | None = "https://classroom.bravotradeacademy.com/courses/dcts/"
+    lms_endpoint: str | None = "https://prestigetradingclub.com/"
     lms_api_key: SecretStr | None = None
     support_line_oa: str = "@prestigeclub"
-    privacy_policy_url: str = "https://www.bravotradeacademy.com/privacy-policy"
-    terms_of_service_url: str = "https://www.bravotradeacademy.com/terms-of-service"
+    privacy_policy_url: str = "https://prestigetradingclub.com/privacy-policy"
+    terms_of_service_url: str = "https://prestigetradingclub.com/terms-of-service"
     # Optional: push tester feedback to a Telegram chat (e.g. the HW Team
     # channel) the moment it is captured, so the agent operator can act on it.
     telegram_bot_token: SecretStr | None = None
@@ -64,6 +62,9 @@ class Settings(BaseSettings):
     sheet_col_email: int = 5
     sheet_col_fb: int = 4
     sheet_col_slip: int = 12
+
+    # ---- Paid access: closed Facebook group (invite link, admin approves join) ----
+    facebook_group_invite_url: str | None = None
 
     # ---- EasySlip slip validation + QR generation ----
     easyslip_api_key: SecretStr | None = None

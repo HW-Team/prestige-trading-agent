@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prestige Trading Club — AI Agent Conversation Flow</title>
+<meta name="description" content="ตัวอย่างบทสนทนา AI Agent — โค้ชกอล์ฟ Rachata DCTS (ข้อมูลอนุมัติ 22 ส.ค. 2569)">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="avatar">ก</div>
+      <div class="brand-text">
+        <h1>โค้ชกอล์ฟ Rachata</h1>
+        <p>AI Agent · ยกระดับชีวิตด้วยอาชีพเทรดเดอร์</p>
+      </div>
+    </div>
+    <div class="status"><span class="dot"></span> ออนไลน์</div>
+  </header>
+
+  <div class="flowbar" id="flowbar" aria-live="polite">
+    <span class="flow-label">สถานะ:</span>
+    <span id="flowState" class="flow-state">ใหม่ (NEW)</span>
+    <span class="flow-arrow">→</span>
+    <span id="flowAction" class="flow-action">รอข้อความลูกค้า</span>
+  </div>
+
+  <main class="chat" id="chat" role="log" aria-live="polite"></main>
+
+  <section class="scenarios">
+    <p class="scenario-title">🎬 เลือกสถานการณ์ตัวอย่าง</p>
+    <div class="scenario-grid" id="scenarioGrid">
+      <button data-scenario="newbie">มือใหม่<br><small>ไม่มีพื้นฐาน</small></button>
+      <button data-scenario="course">สนใจคอร์ส<br><small>ถามรายละเอียด</small></button>
+      <button data-scenario="indicator">สนใจ Indicator<br><small>ทดลองใช้</small></button>
+      <button data-scenario="payment">ชำระเงินสำเร็จ<br><small>ส่งสลิป</small></button>
+      <button data-scenario="unclear">คำถามไม่ชัด<br><small>ทดสอบ AI</small></button>
+      <button data-scenario="unsub">ขอหยุด<br><small>ไม่สนใจแล้ว</small></button>
+    </div>
+  </section>
+
+  <form class="composer" id="composer">
+    <input id="input" type="text" maxlength="500" autocomplete="off"
+           placeholder="พิมพ์ข้อความ เช่น สนใจคอร์ส 3,990 บาท..."
+           aria-label="พิมพ์ข้อความ">
+    <button type="submit" aria-label="ส่ง">➤</button>
+  </form>
+
+  <footer class="foot">
+    <p>⚠️ ตัวอย่างจำลองเพื่อแสดง Conversation Flow — ใช้ข้อความที่ทีมอนุมัติแล้วเท่านั้น</p>
+    <p>การลงทุนในตลาดการเงินมีความเสี่ยง ข้อมูลสถิติและผลการทดสอบย้อนหลังมิใช่การการันตีผลตอบแทนในอนาคต</p>
+  </footer>
+
+</div>
+
+<script src="knowledge-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -16,11 +16,13 @@ from prestige_trading_agent.knowledge import (
     FORBIDDEN_CLAIMS,
     HANDOFF_RULES,
     PACKAGES,
+    PAYMENT_FORMS,
     PUBLIC_LINKS,
     SCENARIOS,
     SEGMENTS,
     SUPPORT_CHANNELS,
     UPSELLS,
+    build_system_prompt,
 )
 
 
@@ -36,6 +38,21 @@ def test_two_approved_packages_with_exact_prices() -> None:
     assert PACKAGES[1].price == "3,990 บาท"
     for pkg in PACKAGES:
         assert "การันตี" in pkg.conditions  # every package reminds no-guarantee
+
+
+def test_portfolio_claim_uses_3000_usd_not_100k_baht() -> None:
+    """Team feedback (พี่ Pana, 2026-08-24): the $300 plan target is 3,000$/mo,
+    NOT 100,000 บาท/เดือน. The old number must never reappear."""
+    prompt = build_system_prompt()
+    assert "100,000" not in prompt
+    assert "3,000$" in prompt
+
+
+def test_payment_forms_are_approved_google_forms() -> None:
+    assert PAYMENT_FORMS["990"] == "https://forms.gle/bjLjyFwxP96hiyF16"
+    assert PAYMENT_FORMS["3990"] == "https://forms.gle/hfTC9ukgNmk71uHv9"
+    assert PAYMENT_FORMS["990"] in build_system_prompt()
+    assert PAYMENT_FORMS["3990"] in build_system_prompt()
 
 
 def test_ten_approved_faqs() -> None:
@@ -57,14 +74,16 @@ def test_forbidden_claims_include_thai_guarantees() -> None:
 
 
 def test_public_links_are_approved_domains_only() -> None:
-    assert PUBLIC_LINKS["beginner_form"].startswith("https://www.bravotradeacademy.com/")
+    assert PUBLIC_LINKS["beginner_form"].startswith("https://prestigetradingclub.com/")
     assert PUBLIC_LINKS["checkout"] == "https://lin.ee/WcilwHP"
-    assert PUBLIC_LINKS["lms"].startswith("https://classroom.bravotradeacademy.com/")
-    assert PUBLIC_LINKS["privacy_policy"].startswith("https://www.bravotradeacademy.com/")
-    assert PUBLIC_LINKS["terms"].startswith("https://www.bravotradeacademy.com/")
+    assert PUBLIC_LINKS["lms"].startswith("https://prestigetradingclub.com/")
+    assert PUBLIC_LINKS["privacy_policy"].startswith("https://prestigetradingclub.com/")
+    assert PUBLIC_LINKS["terms"].startswith("https://prestigetradingclub.com/")
     # No paid LINE room link anywhere in public links.
     for url in PUBLIC_LINKS.values():
-        assert "lin.ee/WcilwHP" in url or "bravotradeacademy.com" in url
+        assert "lin.ee/WcilwHP" in url or "prestigetradingclub.com" in url or "forms.gle" in url
+    # No legacy bravotradeacademy URLs may survive.
+    assert "bravotradeacademy" not in " ".join(PUBLIC_LINKS.values())
 
 
 def test_support_channel_is_line_oa() -> None:

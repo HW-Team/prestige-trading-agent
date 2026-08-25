@@ -91,7 +91,7 @@ def apply_safety_rules(route: AgentRoute) -> AgentRoute:
     # Financial promises / guarantee claims are forbidden in any form.
     unsafe_claim = any(term.lower() in text for term in FORBIDDEN_CLAIMS)
     # URL policy: the only links allowed are the approved public ones
-    # (LINE OA lin.ee/WcilwHP + bravotradeacademy.com). Any other http link —
+    # (LINE OA lin.ee/WcilwHP + prestigetradingclub.com + forms.gle). Any other http link —
     # especially a lin.ee / line.me paid room invite — triggers a handoff.
     urls = re.findall(r"https?://[^\s)\]]+", route.reply, flags=re.IGNORECASE)
     # Case-insensitive whitelist match (lin.ee paths are case-sensitive).

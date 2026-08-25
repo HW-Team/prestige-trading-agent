@@ -356,6 +356,29 @@ async def process_stripe_event(session: AsyncSession, event: dict[str, Any]) -> 
         await enqueue(
             session, OutboxKind.PROVISION_PAID_ACCESS, f"paid-access:{provider_id}", safe_payload
         )
+        # Paid room = closed Facebook group; admin adds members manually after
+        # slip validation + form. Send the confirmation notice to the customer
+        # through their active conversation channel (if any).
+        convs = list(
+            (
+                await session.scalars(
+                    select(Conversation)
+                    .where(Conversation.contact_id == contact.id)
+                    .order_by(Conversation.created_at.desc())
+                )
+            ).all()
+        )
+        if convs:
+            conv = convs[0]
+            await enqueue(
+                session,
+                OutboxKind.SEND_PAID_ROOM,
+                f"paid-room:{provider_id}",
+                {
+                    "recipient_id": conv.external_thread_id,
+                    "channel": conv.channel,
+                },
+            )
     record.processed_at = datetime.now(UTC)
     await session.flush()
     return False
