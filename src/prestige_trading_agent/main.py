@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -42,7 +43,9 @@ from prestige_trading_agent.services import (
     InvalidTransition,
     approve_access,
     complete_form,
+    conversation_is_checkout,
     crosscheck_google_sheet,
+    handle_slip_image,
     ingest_message,
     process_stripe_event,
     validate_slip_with_easyslip,
@@ -97,10 +100,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             if worker_task is not None:
                 worker_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await worker_task
-                except asyncio.CancelledError:
-                    pass
             await database.dispose()
 
     app = FastAPI(title="Prestige Trading Agent", version="0.1.0", lifespan=lifespan)
@@ -237,6 +238,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
                 processed += int(not duplicate)
                 duplicates += int(duplicate)
+                # Slip images: a Messenger image attachment may be a payment
+                # slip. If we're mid-checkout, validate it via EasySlip and
+                # route the outcome (paid → form+FB group; mismatch → retry).
+                attachments = message.get("attachments") or []
+                image_urls = [
+                    str(a["payload"]["url"])
+                    for a in attachments
+                    if a.get("type") == "image" and a.get("payload", {}).get("url")
+                ]
+                if image_urls and conversation_is_checkout(session, sender):
+                    await handle_slip_image(session, config, sender, image_urls[0])
             for change in entry.get("changes", []):
                 if change.get("field") != "leadgen":
                     continue

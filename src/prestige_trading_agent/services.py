@@ -192,11 +192,19 @@ async def ingest_message(
             text=text,
         )
     )
+    # Cross-session memory: recall anything mem0 remembers about this customer
+    # and surface it as extra context; then remember this message.
+    from prestige_trading_agent.memory import recall, remember
+
+    recalled = await recall(external_id, text)
+    if recalled:
+        history = (*history, ("system", f"[ความทรงจำเกี่ยวกับลูกค้า] {recalled}"))
     route = await route_message(
         agent,
         text,
         AgentDependencies(contact.id, conversation.id, conversation.state, history),
     )
+    await remember(external_id, text)
     try:
         conversation.state = transition(conversation.state, route.next_state)
     except InvalidTransition:
@@ -541,3 +549,89 @@ async def crosscheck_google_sheet(
                     "meta": {"row_index": idx, "matched_by": key},
                 }
     return {"ok": False, "reason": "no_match", "meta": {}}
+
+
+# ---------------------------------------------------------------------------
+# Slip image handling (Messenger/LINE image attachment = payment slip)
+# ---------------------------------------------------------------------------
+
+
+async def conversation_is_checkout(session: AsyncSession, external_id: str) -> bool:
+    """True when the customer's active conversation is mid-checkout."""
+    conversation = await session.scalar(
+        select(Conversation).where(
+            Conversation.external_thread_id == external_id,
+            Conversation.channel == "messenger",
+        )
+    )
+    return conversation is not None and conversation.state is FunnelState.CHECKOUT_PENDING
+
+
+async def handle_slip_image(
+    session: AsyncSession, settings: Any, external_id: str, image_url: str
+) -> None:
+    """Validate a slip image (EasySlip → Sheet fallback) and route the outcome.
+
+    - Valid → enqueue post-payment form + FB group invite + mark paid.
+    - Invalid → reply asking the customer to re-send the correct slip.
+    """
+    from prestige_trading_agent.knowledge import PAYMENT_FORMS
+
+    conversation = await session.scalar(
+        select(Conversation).where(
+            Conversation.external_thread_id == external_id,
+            Conversation.channel == "messenger",
+        )
+    )
+    if conversation is None:
+        return
+    # Determine package from the conversation's recent context (default 3990).
+    package = "3990"
+    result = await validate_slip_with_easyslip(session, settings, slip_image_url=image_url)
+    if not result["ok"]:
+        result = await crosscheck_google_sheet(
+            session,
+            settings,
+            sheet_id=settings.sheet_3990_id,
+            external_id=external_id,
+        )
+        if result["ok"]:
+            package = "3990"
+    if not result["ok"]:
+        await enqueue(
+            session,
+            OutboxKind.SEND_MESSAGE,
+            f"slip-retry:{external_id}",
+            {
+                "recipient_id": external_id,
+                "channel": "messenger",
+                "text": (
+                    "ขออภัยครับ ตรวจสอบสลิปไม่พบรายการโอนในระบบ "
+                    "กรุณาส่งสลิปโอนเงินอีกครั้ง หรือแจ้งชื่อ-นามสกุลที่โอน "
+                    "ให้เจ้าหน้าที่ตรวจสอบให้ครับ"
+                ),
+            },
+        )
+        return
+    conversation.state = FunnelState.PAID_ACTIVE
+    await session.flush()
+    await enqueue(
+        session,
+        OutboxKind.SEND_MESSAGE,
+        f"paid:{external_id}",
+        {
+            "recipient_id": external_id,
+            "channel": "messenger",
+            "text": (
+                "ยินดีด้วยครับ ตรวจพบการชำระเงินเรียบร้อย! "
+                f"กรุณากรอกฟอร์มเพื่อรับสิทธิ์: {PAYMENT_FORMS[package]} "
+                "แล้วกดเข้ากลุ่ม Facebook ปิดผ่านลิงก์ที่แอดมินส่งให้ เจ้าหน้าที่จะอนุมัติภายใน 24 ชม. ครับ"
+            ),
+        },
+    )
+    await enqueue(
+        session,
+        OutboxKind.SEND_PAID_ROOM,
+        f"paid-room:{external_id}",
+        {"recipient_id": external_id, "channel": "messenger", "package": package},
+    )
