@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -73,8 +74,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.agent = agent
         app.state.adapter = adapter
         logger.info("service_started", environment=config.environment)
-        yield
-        await database.dispose()
+
+        # Outbox worker: poll for pending jobs and dispatch them (Messenger /
+        # LINE sends, LMS enroll, access provisioning). In "recording" mode the
+        # adapter only logs, so this loop is harmless pre-production.
+        worker_task: asyncio.Task[None] | None = None
+
+        async def _outbox_loop() -> None:
+            from prestige_trading_agent.outbox import drain_outbox
+
+            poll_interval = 2.0
+            while True:
+                try:
+                    await drain_outbox(database, adapter)
+                except Exception as exc:
+                    logger.warning("outbox_drain_failed", error=str(exc))
+                await asyncio.sleep(poll_interval)
+
+        worker_task = asyncio.create_task(_outbox_loop())
+        try:
+            yield
+        finally:
+            if worker_task is not None:
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
+            await database.dispose()
 
     app = FastAPI(title="Prestige Trading Agent", version="0.1.0", lifespan=lifespan)
 
