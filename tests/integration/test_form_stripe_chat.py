@@ -94,6 +94,69 @@ async def test_feedback_requires_existing_message(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_payment_endpoint_returns_qr_and_form(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/internal/payment",
+        json={"package": "3990"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["qr_image"] == "/assets/payment-qr.jpg"
+    assert data["bank_account_name"] == "นาย รชต มากมูล"
+    assert data["form_url"] == "https://forms.gle/hfTC9ukgNmk71uHv9"
+
+    resp990 = await client.post(
+        "/internal/payment",
+        json={"package": "990"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert resp990.json()["form_url"] == "https://forms.gle/bjLjyFwxP96hiyF16"
+
+
+@pytest.mark.asyncio
+async def test_payment_qr_asset_served(client: AsyncClient) -> None:
+    resp = await client.get("/assets/payment-qr.jpg")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("image/")
+
+
+@pytest.mark.asyncio
+async def test_crosscheck_google_sheet_real_public_sheet() -> None:
+    """The 3990 response sheet is public; a real customer row (Line ID
+    'theamy555') must resolve and carry a slip reference."""
+    from prestige_trading_agent.config import Settings
+    from prestige_trading_agent.services import crosscheck_google_sheet
+
+    settings = Settings(sheet_3990_id="10RlTyP7lIs-tzNEFzXH889OrGDS2cuocmRJRE2Qpwcc")
+    result = await crosscheck_google_sheet(
+        None, settings, sheet_id=settings.sheet_3990_id, line_id="theamy555"
+    )
+    assert result["ok"] is True
+    assert result["meta"]["matched_by"] == "line_id"
+
+
+@pytest.mark.asyncio
+async def test_line_webhook_requires_valid_signature(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/webhooks/line",
+        json={"events": []},
+        headers={"X-Line-Signature": "bad-signature"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_line_webhook_rejects_bad_payload(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/webhooks/line",
+        content=b"not-json",
+        headers={"X-Line-Signature": "anything"},
+    )
+    assert resp.status_code in {400, 401}
+
+
+@pytest.mark.asyncio
 async def test_signed_form_schedules_only_free_line_invite(client: AsyncClient) -> None:
     payload = {
         "submission_id": "sub-1",

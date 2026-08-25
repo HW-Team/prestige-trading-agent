@@ -232,12 +232,12 @@ async def ingest_message(
         )
         if existing_request is None:
             session.add(AccessRequest(contact_id=contact.id))
-    if channel == "messenger":
+    if channel in {"messenger", "line"}:
         await enqueue(
             session,
             OutboxKind.SEND_MESSAGE,
             f"reply:{message_id}",
-            {"recipient_id": external_id, "text": route.reply},
+            {"recipient_id": external_id, "text": route.reply, "channel": channel},
         )
     return route, False, outbound_id
 
@@ -395,3 +395,108 @@ async def approve_access(
         {"contact_id": item.contact_id, "access_request_id": item.id},
     )
     return item
+
+
+# ---------------------------------------------------------------------------
+# Slip validation: EasySlip API primary, Google Sheet cross-check fallback.
+# ---------------------------------------------------------------------------
+
+
+async def validate_slip_with_easyslip(
+    session: AsyncSession,
+    settings: Any,
+    *,
+    slip_image_url: str,
+    expected_amount: str | None = None,
+) -> dict[str, Any]:
+    """Validate a payment slip via the EasySlip API (if configured).
+
+    Returns {"ok": bool, "reason": str, "meta": {...}}. When EasySlip is not
+    configured (no api key), returns ok=False reason="easyslip_not_configured"
+    so the caller can fall back to the Google Sheet cross-check.
+    """
+    if settings.easyslip_api_key is None:
+        return {"ok": False, "reason": "easyslip_not_configured", "meta": {}}
+    from prestige_trading_agent.adapters import EasySlipAdapter
+
+    adapter = EasySlipAdapter(settings)
+    try:
+        result = await adapter.validate(slip_image_url, expected_amount)
+        return result
+    except Exception as exc:
+        return {"ok": False, "reason": f"easyslip_error: {exc}", "meta": {}}
+
+
+async def crosscheck_google_sheet(
+    session: AsyncSession,
+    settings: Any,
+    *,
+    sheet_id: str,
+    external_id: str | None = None,
+    line_id: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    """Cross-check a customer against the package's Google Sheet response.
+
+    The approved Google Forms write to two public sheets (one per package).
+    A row counts as a match when ANY identity field we have (LINE ID, phone,
+    email) matches a row AND that row has a slip attached (col 12 non-empty).
+    Returns {"ok": bool, "reason": str, "meta": {"row_index": int|None}}.
+    """
+    import csv
+    import urllib.request
+
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+    try:
+        with urllib.request.urlopen(url, timeout=20) as resp:
+            text = resp.read().decode("utf-8-sig")
+    except Exception as exc:
+        return {"ok": False, "reason": f"sheet_unreachable: {exc}", "meta": {}}
+
+    rows = list(csv.reader(text.splitlines()))
+    if not rows:
+        return {"ok": False, "reason": "sheet_empty", "meta": {}}
+    header = rows[0]
+    col = {
+        "line_id": settings.sheet_col_line_id,
+        "phone": settings.sheet_col_phone,
+        "email": settings.sheet_col_email,
+        "fb": settings.sheet_col_fb,
+        "slip": settings.sheet_col_slip,
+    }
+    if max(col.values()) >= len(header):
+        return {"ok": False, "reason": "sheet_schema_mismatch", "meta": {}}
+
+    def norm(v: str | None) -> str:
+        return (v or "").strip().lower().replace(" ", "")
+
+    candidates = {
+        "line_id": norm(line_id),
+        "phone": norm(phone),
+        "email": norm(email),
+        "external_id": norm(external_id),
+    }
+    for idx, row in enumerate(rows[1:], start=2):  # 1-based for humans
+        row_vals = row + [""] * (len(header) - len(row))
+        has_slip = bool(row_vals[col["slip"]].strip())
+        for key, needle in candidates.items():
+            if not needle:
+                continue
+            if key == "external_id":
+                # The external_id often equals the LINE UID in production.
+                if needle == norm(row_vals[col["line_id"]]):
+                    return {
+                        "ok": has_slip,
+                        "reason": "matched" if has_slip else "no_slip_yet",
+                        "meta": {"row_index": idx, "matched_by": "line_id"},
+                    }
+                continue
+            cell = norm(row_vals[col[key]]) if key in col else ""
+            if needle and cell and needle in cell:
+                return {
+                    "ok": has_slip,
+                    "reason": "matched" if has_slip else "no_slip_yet",
+                    "meta": {"row_index": idx, "matched_by": key},
+                }
+    return {"ok": False, "reason": "no_match", "meta": {}}

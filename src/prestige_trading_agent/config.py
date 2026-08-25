@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     meta_verify_token: SecretStr = SecretStr("change-me")
     meta_app_secret: SecretStr = SecretStr("change-me")
     meta_page_access_token: SecretStr | None = None
+    meta_app_id: str | None = None
+    meta_page_id: str | None = None
     form_webhook_secret: SecretStr = SecretStr("change-me")
     stripe_webhook_secret: SecretStr = SecretStr("change-me")
     model: str = "test"
@@ -37,6 +39,44 @@ class Settings(BaseSettings):
     # channel) the moment it is captured, so the agent operator can act on it.
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
+
+    # ---- Payment: PromptPay QR + bank (approved 2026-08-24) ----
+    payment_qr_url: str = "/assets/payment-qr.jpg"  # served by the app itself
+    bank_name: str = "ธนาคารกสิกรไทย (KBank)"
+    bank_account_name: str = "นาย รชต มากมูล"
+    bank_account_number: str = "xxx-x-x6834-x"  # as printed on the official QR
+    promptpay_ref: str = "004999003379228"
+    payment_instructions: str = (
+        "สแกน QR เพื่อโอนค่าคอร์ส แล้วส่งสลิปโอนเงินกลับมาในแชท เจ้าหน้าที่จะตรวจสอบและเปิดสิทธิ์ให้ภายใน 15 นาทีครับ"
+    )
+
+    # ---- Post-payment Google Forms (one per package) ----
+    form_990_url: str = "https://forms.gle/bjLjyFwxP96hiyF16"
+    form_3990_url: str = "https://forms.gle/hfTC9ukgNmk71uHv9"
+
+    # ---- Google Sheets for cross-checking paid customers ----
+    # Both are public "anyone with link" response sheets from the forms above.
+    sheet_990_id: str = "1VCzHIRomvtX9d1zXqyx77HPClKhMznpRARzfD94dBk8"
+    sheet_3990_id: str = "10RlTyP7lIs-tzNEFzXH889OrGDS2cuocmRJRE2Qpwcc"
+    # Column indexes (0-based) in both sheets — locked by test.
+    sheet_col_line_id: int = 6
+    sheet_col_phone: int = 3
+    sheet_col_email: int = 5
+    sheet_col_fb: int = 4
+    sheet_col_slip: int = 12
+
+    # ---- EasySlip slip validation + QR generation ----
+    easyslip_api_key: SecretStr | None = None
+    easyslip_base_url: str = "https://api.easyslip.com/v1"
+    easyslip_merchant_name: str = "รชต มากมูล"
+    # PromptPay proxy to embed in generated QR codes (msisdn OR natId).
+    easyslip_proxy_msisdn: str | None = None
+    easyslip_proxy_natid: str | None = None
+
+    # ---- LINE Messaging API ----
+    line_channel_access_token: SecretStr | None = None
+    line_channel_secret: SecretStr | None = None
+    line_verify_token: SecretStr = SecretStr("change-me")
 
 
 @lru_cache

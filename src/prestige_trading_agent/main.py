@@ -12,6 +12,7 @@ import structlog
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,8 @@ from prestige_trading_agent.domain import (
     ChatRequest,
     FeedbackCreate,
     FormCompletion,
+    PaymentCheckRequest,
+    PaymentRequest,
 )
 from prestige_trading_agent.models import (
     AccessRequest,
@@ -38,8 +41,10 @@ from prestige_trading_agent.services import (
     InvalidTransition,
     approve_access,
     complete_form,
+    crosscheck_google_sheet,
     ingest_message,
     process_stripe_event,
+    validate_slip_with_easyslip,
 )
 
 logger = structlog.get_logger()
@@ -96,6 +101,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def ready(session: AsyncSession = Depends(session_dependency)) -> dict[str, str]:
         await session.execute(text("SELECT 1"))
         return {"status": "ready"}
+
+    # Serve static assets (payment QR, test console) from web/.
+    assets_dir = (
+        Path(__file__).resolve().parent.parent.parent / "web" / "agent-test-console" / "assets"
+    )
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     @app.get("/test", include_in_schema=False)
     async def test_console() -> Response:
@@ -210,6 +222,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 duplicates += int(duplicate)
         return {"status": "accepted", "processed": processed, "duplicates": duplicates}
 
+    @app.post("/webhooks/line")
+    async def line_events(
+        request: Request,
+        session: AsyncSession = Depends(session_dependency),
+        x_line_signature: str = Header(default=""),
+    ) -> dict[str, Any]:
+        """LINE Messaging API webhook. Signature = HMAC-SHA256 of the raw body
+        using the channel secret; never trust events without a valid signature."""
+        body = await request.body()
+        if not _verify_hmac(
+            config.line_channel_secret.get_secret_value() if config.line_channel_secret else "",
+            body,
+            x_line_signature,
+            "",  # LINE sends raw base64 HMAC, no prefix
+        ):
+            raise HTTPException(status_code=401, detail="Invalid LINE signature")
+        try:
+            events = json.loads(body.decode("utf-8")).get("events", [])
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(status_code=400, detail="Invalid LINE payload") from None
+        processed = 0
+        for event in events:
+            if event.get("type") != "message":
+                continue
+            message = event.get("message", {})
+            source = event.get("source", {})
+            reply_token = event.get("replyToken", "")
+            user_id = source.get("userId", "")
+            text = str(message.get("text", ""))
+            if not user_id or not text:
+                continue
+            _, duplicate, _ = await ingest_message(
+                session,
+                agent,
+                external_id=user_id,
+                message_id=f"line:{reply_token or user_id}:{message.get('id', '')}",
+                text=text,
+                source="line",
+                source_id=user_id,
+                channel="line",
+            )
+            processed += int(not duplicate)
+        return {"status": "accepted", "processed": processed}
+
     @app.post("/webhooks/form")
     async def form_events(
         request: Request,
@@ -288,6 +344,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
             for r in rows
         ]
+
+    @app.post("/internal/payment", dependencies=[Depends(require_admin)])
+    async def internal_payment(
+        payload: PaymentRequest, session: AsyncSession = Depends(session_dependency)
+    ) -> dict[str, str]:
+        """Return the payment QR + bank info + the package's post-payment form.
+
+        Call this when a customer picks a package. 990 → form_990_url,
+        3990 → form_3990_url. Always returns the approved QR image URL.
+        """
+        form_url = config.form_3990_url if payload.package == "3990" else config.form_990_url
+        return {
+            "qr_image": config.payment_qr_url,
+            "bank_name": config.bank_name,
+            "bank_account_name": config.bank_account_name,
+            "account_number": config.bank_account_number,
+            "promptpay_ref": config.promptpay_ref,
+            "instructions": config.payment_instructions,
+            "form_url": form_url,
+        }
+
+    @app.post("/internal/check-payment", dependencies=[Depends(require_admin)])
+    async def internal_check_payment(
+        payload: PaymentCheckRequest, session: AsyncSession = Depends(session_dependency)
+    ) -> dict[str, Any]:
+        """Validate a payment. EasySlip first (if configured), then fall back
+        to cross-checking the package's public Google Sheet by identity."""
+        sheet_id = config.sheet_3990_id if payload.package == "3990" else config.sheet_990_id
+        easyslip = await validate_slip_with_easyslip(
+            session,
+            config,
+            slip_image_url=payload.slip_image_url or "",
+            expected_amount=payload.expected_amount,
+        )
+        if easyslip["ok"]:
+            return {"valid": True, "method": "easyslip", **easyslip}
+        sheet = await crosscheck_google_sheet(
+            session,
+            config,
+            sheet_id=sheet_id,
+            external_id=payload.external_id,
+            line_id=payload.line_id,
+            phone=payload.phone,
+            email=payload.email,
+        )
+        if sheet["ok"]:
+            return {"valid": True, "method": "sheet", **sheet}
+        # Neither validated: if the sheet was reachable but no match, it's a
+        # genuine pending state; hand off to an admin to review manually.
+        return {
+            "valid": False,
+            "method": "none",
+            "reason": sheet["reason"],
+            "easyslip_reason": easyslip["reason"],
+        }
 
     @app.post("/internal/feedback", dependencies=[Depends(require_admin)])
     async def submit_feedback(
