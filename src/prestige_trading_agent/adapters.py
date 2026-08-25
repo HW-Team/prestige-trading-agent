@@ -53,6 +53,8 @@ class EasySlipAdapter:
             body["msisdn"] = self.settings.easyslip_proxy_msisdn
         elif self.settings.easyslip_proxy_natid:
             body["natId"] = self.settings.easyslip_proxy_natid
+        elif self.settings.easyslip_proxy_ewalletid:
+            body["eWalletId"] = self.settings.easyslip_proxy_ewalletid
         if amount is not None:
             body["amount"] = round(float(amount), 2)
         response = await self.client.post(

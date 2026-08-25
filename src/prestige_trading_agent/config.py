@@ -70,9 +70,10 @@ class Settings(BaseSettings):
     easyslip_api_key: SecretStr | None = None
     easyslip_base_url: str = "https://api.easyslip.com/v1"
     easyslip_merchant_name: str = "รชต มากมูล"
-    # PromptPay proxy to embed in generated QR codes (msisdn OR natId).
+    # PromptPay proxy to embed in generated QR codes (msisdn OR natId OR eWalletId).
     easyslip_proxy_msisdn: str | None = None
     easyslip_proxy_natid: str | None = None
+    easyslip_proxy_ewalletid: str | None = None
 
     # ---- LINE Messaging API ----
     line_channel_access_token: SecretStr | None = None
