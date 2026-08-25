@@ -74,5 +74,19 @@ class FeedbackCreate(BaseModel):
     tester: str | None = Field(default=None, max_length=255)
 
 
+class PaymentRequest(BaseModel):
+    package: Literal["990", "3990"] = "990"
+
+
+class PaymentCheckRequest(BaseModel):
+    package: Literal["990", "3990"] = "990"
+    slip_image_url: str | None = Field(default=None, max_length=2000)
+    expected_amount: str | None = Field(default=None, max_length=20)
+    external_id: str | None = Field(default=None, max_length=255)
+    line_id: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=50)
+    email: str | None = Field(default=None, max_length=255)
+
+
 class ORMResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
