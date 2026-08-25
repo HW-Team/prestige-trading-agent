@@ -271,6 +271,82 @@ async def test_course_chat_enqueues_payment_qr_with_package(client: AsyncClient)
     assert qr_jobs[-1]["payload"]["channel"] == "messenger"
 
 
+def _meta_msg(sender: str, mid: str, text: str) -> tuple[bytes, str]:
+    """Build a signed Meta Messenger webhook body for one text message."""
+    payload = {
+        "object": "page",
+        "entry": [
+            {
+                "id": "108433865417846",
+                "time": 1720000000,
+                "messaging": [
+                    {
+                        "sender": {"id": sender},
+                        "recipient": {"id": "108433865417846"},
+                        "timestamp": 1720000000,
+                        "message": {"mid": mid, "text": text},
+                    }
+                ],
+            }
+        ],
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    sig = "sha256=" + hmac.new(b"meta-secret", body, hashlib.sha256).hexdigest()
+    return body, sig
+
+
+@pytest.mark.asyncio
+async def test_qr_sent_when_customer_never_mentions_price(client: AsyncClient) -> None:
+    """Regression: a customer who reaches checkout without typing the price
+    ("สนใจครับ" / "ขอ qr หน่อยครับ") must still receive the QR. The old trigger
+    required "990"/"3990" in the customer's message, so the QR was silently
+    never enqueued while the bot's reply promised it."""
+    # Turn 1: customer expresses interest, no price anywhere in the message.
+    body, sig = _meta_msg("buyer-noprice", "mid-qr-noprice-1", "สนใจคอร์ส DCTS ครับ")
+    resp = await client.post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": sig})
+    assert resp.status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    qr_jobs = [
+        j for j in jobs
+        if j["kind"] == "send_qr_image" and j["payload"]["recipient_id"] == "buyer-noprice"
+    ]
+    assert len(qr_jobs) == 1, f"QR must be enqueued from routing alone, got {len(qr_jobs)}"
+    assert qr_jobs[0]["payload"]["package"] == "3990"
+    assert qr_jobs[0]["payload"]["channel"] == "messenger"
+
+    # Turn 2: customer asks for the QR explicitly — must trigger a NEW job
+    # (fresh dedupe key), not be swallowed by the turn-1 dedupe.
+    body2, sig2 = _meta_msg("buyer-noprice", "mid-qr-noprice-2", "ขอ qr หน่อยครับ")
+    resp2 = await client.post(
+        "/webhooks/meta", content=body2, headers={"X-Hub-Signature-256": sig2}
+    )
+    assert resp2.status_code == 200
+    jobs2 = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    qr_jobs2 = [
+        j for j in jobs2
+        if j["kind"] == "send_qr_image" and j["payload"]["recipient_id"] == "buyer-noprice"
+    ]
+    msg = f"explicit re-request must enqueue a fresh QR job, got {len(qr_jobs2)}"
+    assert len(qr_jobs2) == 2, msg
+
+
+@pytest.mark.asyncio
+async def test_qr_reroute_no_wrong_amount_when_package_unknown(client: AsyncClient) -> None:
+    """Safety: if the package cannot be determined (no price in message, reply,
+    or history), no QR is sent — never a wrong-amount QR."""
+    body, sig = _meta_msg("buyer-unknown", "mid-qr-unknown-1", "อยากได้ข้อมูลเพิ่มเติมครับ")
+    resp = await client.post(
+        "/webhooks/meta", content=body, headers={"X-Hub-Signature-256": sig}
+    )
+    assert resp.status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    qr_jobs = [
+        j for j in jobs
+        if j["kind"] == "send_qr_image" and j["payload"]["recipient_id"] == "buyer-unknown"
+    ]
+    assert len(qr_jobs) == 0
+
+
 @pytest.mark.asyncio
 async def test_consult_coach_handoff_replies_with_line_oa(client: AsyncClient) -> None:
     resp = await client.post(

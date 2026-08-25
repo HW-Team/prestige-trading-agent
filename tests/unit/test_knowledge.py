@@ -123,6 +123,7 @@ def test_scenarios_cover_all_situations() -> None:
     assert set(SCENARIOS) == {
         "newbie_start",
         "course_interest",
+        "course_checkout",
         "indicator_trial",
         "unclear",
         "payment_success",

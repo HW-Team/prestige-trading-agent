@@ -154,6 +154,19 @@ def _offline_route(prompt: str) -> AgentRoute:
             next_action=NextAction.HUMAN_HANDOFF,
             rationale="customer wants to talk to a human (coach/consultant)",
         )
+    # Payment / QR request mid-checkout: the customer is NOT expressing new
+    # intent — they want the payment QR. Keep the funnel at checkout so the
+    # QR enqueue (services) fires on the state; SEND_CHECKOUT re-prompts it.
+    if any(
+        kw in lower for kw in ("qr", "promptpay", "prompt pay", "โอน", "สลิป", "จ่าย")
+    ):
+        return AgentRoute(
+            reply=SCENARIOS["course_checkout"]["reply"],
+            path=FunnelPath.COURSE,
+            next_state=FunnelState.CHECKOUT_PENDING,
+            next_action=NextAction.SEND_CHECKOUT,
+            rationale="customer asks for payment QR while at checkout",
+        )
     return AgentRoute(
         reply=(
             "สวัสดีครับ ยินดีให้คำแนะนำเกี่ยวกับระบบ DCTS ค่ะ/ครับ "

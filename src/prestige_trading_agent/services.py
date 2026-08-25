@@ -30,6 +30,21 @@ class InvalidTransition(ValueError):
     pass
 
 
+def _extract_package(*texts: str) -> str | None:
+    """Return the DCTS package (990|3990) mentioned in any text, or None.
+
+    Checks full-version markers first because "990" is a substring of
+    "3,990" — a bare "990" match would misclassify the full package.
+    """
+    for t in texts:
+        low = t.lower()
+        if "3,990" in low or "3990" in low or "ฉบับเต็ม" in low or "เต็ม" in low:
+            return "3990"
+        if "990" in low:
+            return "990"
+    return None
+
+
 TRANSITIONS: dict[FunnelState, frozenset[FunnelState]] = {
     FunnelState.NEW: frozenset(
         {
@@ -247,23 +262,38 @@ async def ingest_message(
             f"reply:{message_id}",
             {"recipient_id": external_id, "text": route.reply, "channel": channel},
         )
-        # When the customer reaches checkout with a package chosen, send the
-        # PromptPay QR image so they can pay immediately in-chat. Only fires
-        # once we actually know which package (990/3990 in the message), so we
-        # never send a wrong-amount QR; deduped per customer+package.
+        # When the customer reaches checkout, send the PromptPay QR image so
+        # they can pay immediately in-chat. Fires on the AGENT's routing
+        # decision (SEND_CHECKOUT) or when the conversation is already at
+        # CHECKOUT_PENDING — NOT on the customer's message containing a price
+        # string (real customers say "สนใจครับ" / "ขอ qr หน่อยครับ" without
+        # ever typing "990"/"3990", which silently dropped the QR entirely).
+        # Package is read from the current turn (message or agent reply) and,
+        # for re-requests, from earlier outbound replies in this conversation.
+        # Deduped per customer+package on the auto-send; explicit re-requests
+        # ("ขอ qr" / "ยังไม่ได้รับ") get a fresh key so the QR actually resends.
         if channel in {"messenger", "line"} and (
-            "990" in text or "3,990" in text or "3990" in text
-        ) and (
             route.next_action is NextAction.SEND_CHECKOUT
             or conversation.state is FunnelState.CHECKOUT_PENDING
         ):
-            package = "3990" if "3,990" in text or "3990" in text or "เต็ม" in text else "990"
-            await enqueue(
-                session,
-                OutboxKind.SEND_QR_IMAGE,
-                f"qr:{external_id}:{package}",
-                {"recipient_id": external_id, "channel": channel, "package": package},
+            package = _extract_package(text, route.reply) or _extract_package(
+                *(m.text for m in prior_rows if m.direction == "outbound")
             )
+            asking_again = any(
+                kw in text.lower() for kw in ("qr", "promptpay", "prompt pay", "โอน", "สลิป", "จ่าย")
+            )
+            if package is not None:
+                dedupe = (
+                    f"qr:{external_id}:{package}"
+                    if not asking_again
+                    else f"qr:{external_id}:{package}:{message_id}"
+                )
+                await enqueue(
+                    session,
+                    OutboxKind.SEND_QR_IMAGE,
+                    dedupe,
+                    {"recipient_id": external_id, "channel": channel, "package": package},
+                )
     return route, False, outbound_id
 
 

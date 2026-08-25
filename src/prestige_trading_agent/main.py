@@ -441,7 +441,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     data = coll.get(include=["documents", "metadatas"])
                     out: list[dict[str, str]] = []
                     for doc, meta in zip(
-                        data.get("documents", []) or [], data.get("metadatas", []) or []
+                        data.get("documents", []) or [],
+                        data.get("metadatas", []) or [],
+                        strict=False,
                     ):
                         out.append(
                             {
