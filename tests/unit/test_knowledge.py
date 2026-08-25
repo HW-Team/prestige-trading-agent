@@ -107,24 +107,26 @@ def test_upsell_and_downsell_are_approved() -> None:
     assert "Public Layer" in DOWNSELLS[0]["still_decline"]
 
 
-def test_handoff_rules_cover_four_topics_with_sla() -> None:
-    assert len(HANDOFF_RULES) == 4
+def test_handoff_rules_cover_topics_with_sla() -> None:
+    assert len(HANDOFF_RULES) == 5
     topics = {rule["topic"] for rule in HANDOFF_RULES}
     assert "การชำระเงินหรือสิทธิ์ใช้งานมีปัญหา" in topics
     assert "ขอคืนเงินหรือยกเลิก" in topics
     assert "TradingView หรือ Indicator เข้าไม่ได้" in topics
     assert "คำถามที่ไม่มีข้อมูลยืนยัน" in topics
+    assert "ต้องการคุยกับโค้ชหรือที่ปรึกษาโดยตรง" in topics
     for rule in HANDOFF_RULES:
         assert rule["sla"]
 
 
-def test_scenarios_cover_all_five_situations() -> None:
+def test_scenarios_cover_all_situations() -> None:
     assert set(SCENARIOS) == {
         "newbie_start",
         "course_interest",
         "indicator_trial",
         "unclear",
         "payment_success",
+        "consult_coach",
     }
 
 

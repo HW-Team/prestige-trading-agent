@@ -239,6 +239,16 @@ async def ingest_message(
             f"reply:{message_id}",
             {"recipient_id": external_id, "text": route.reply, "channel": channel},
         )
+        # When the customer picks a package, also send the PromptPay QR image
+        # so they can pay immediately in-chat (no LINE OA hop).
+        if route.next_action is NextAction.SEND_CHECKOUT:
+            package = "3990" if "3,990" in text or "3990" in text or "เต็ม" in text else "990"
+            await enqueue(
+                session,
+                OutboxKind.SEND_QR_IMAGE,
+                f"qr:{message_id}",
+                {"recipient_id": external_id, "channel": channel, "package": package},
+            )
     return route, False, outbound_id
 
 

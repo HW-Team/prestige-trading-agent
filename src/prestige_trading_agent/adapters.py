@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -196,6 +197,71 @@ class LiveAdapter:
         )
         response.raise_for_status()
 
+    async def _send_image_meta(self, recipient_id: str, image_url: str) -> None:
+        """Send an image (attachment) to a Messenger recipient via Graph API."""
+        token = self.settings.meta_page_access_token
+        if token is None:
+            raise RuntimeError("PRESTIGE_META_PAGE_ACCESS_TOKEN is required for live Messenger")
+        response = await self.client.post(
+            "https://graph.facebook.com/v23.0/me/messages",
+            params={"access_token": token.get_secret_value()},
+            json={
+                "recipient": {"id": recipient_id},
+                "message": {"attachment": {"type": "image", "payload": {"url": image_url}}},
+            },
+        )
+        response.raise_for_status()
+
+    async def _send_image_line(self, recipient_id: str, image_url: str) -> None:
+        """Send an image message to a LINE user (requires public HTTPS URL)."""
+        token = self.settings.line_channel_access_token
+        if token is None:
+            raise RuntimeError("PRESTIGE_LINE_CHANNEL_ACCESS_TOKEN is required for live LINE")
+        response = await self.client.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={
+                "Authorization": f"Bearer {token.get_secret_value()}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "to": recipient_id,
+                "messages": [
+                    {
+                        "type": "image",
+                        "originalContentUrl": image_url,
+                        "previewImageUrl": image_url,
+                    }
+                ],
+            },
+        )
+        response.raise_for_status()
+
+    async def _send_payment_qr(self, payload: dict[str, Any]) -> None:
+        """Generate a PromptPay QR via EasySlip (amount = package price) and
+        send it as an image. Falls back to the static QR asset URL when
+        EasySlip isn't configured."""
+        recipient_id = str(payload["recipient_id"])
+        channel = str(payload.get("channel", "messenger"))
+        package = str(payload.get("package", "3990"))
+        amount = 990.0 if package == "990" else 3990.0
+
+        image_url = self.settings.payment_qr_url
+        easyslip = EasySlipAdapter(self.settings)
+        result = await easyslip.generate_qr(amount=amount)
+        if result["ok"] and result.get("image"):
+            import base64
+
+            raw = base64.b64decode(result["image"])
+            path = Path(f"/data/qr-{package}.png")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+            image_url = f"{self.settings.public_base_url}/assets/qr-{package}.png"
+
+        if channel == "line":
+            await self._send_image_line(recipient_id, image_url)
+        else:
+            await self._send_image_meta(recipient_id, image_url)
+
     async def dispatch(self, kind: OutboxKind, payload: dict[str, Any]) -> None:
         if kind is OutboxKind.SEND_MESSAGE:
             channel = str(payload.get("channel", "messenger"))
@@ -203,6 +269,8 @@ class LiveAdapter:
                 await self._send_line(str(payload["recipient_id"]), str(payload["text"]))
             else:
                 await self._send_meta(str(payload["recipient_id"]), str(payload["text"]))
+        elif kind is OutboxKind.SEND_QR_IMAGE:
+            await self._send_payment_qr(payload)
         elif kind is OutboxKind.SEND_FREE_LINE_INVITE:
             await self._send_meta(
                 str(payload["recipient_id"]),

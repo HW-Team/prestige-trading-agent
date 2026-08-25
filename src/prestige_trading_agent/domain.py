@@ -37,6 +37,7 @@ class NextAction(StrEnum):
 
 class OutboxKind(StrEnum):
     SEND_MESSAGE = "send_message"
+    SEND_QR_IMAGE = "send_qr_image"
     SEND_FREE_LINE_INVITE = "send_free_line_invite"
     SEND_PAID_ROOM = "send_paid_room"
     ENROLL_LMS = "enroll_lms"

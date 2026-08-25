@@ -136,6 +136,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
+    # Serve dynamically generated payment QRs persisted under /data (EasySlip).
+    data_qr_dir = Path("/data")
+    if data_qr_dir.is_dir():
+        app.mount("/data", StaticFiles(directory=str(data_qr_dir)), name="data")
+
+    # Also expose generated QRs at /assets/qr-*.png for the public base URL.
+    @app.get("/assets/qr-{package}.png", include_in_schema=False)
+    async def generated_qr(package: str) -> Response:
+        qr_file = data_qr_dir / f"qr-{package}.png"
+        if not qr_file.is_file():
+            raise HTTPException(status_code=404, detail="QR not generated yet")
+        return Response(content=qr_file.read_bytes(), media_type="image/png")
+
     @app.get("/test", include_in_schema=False)
     async def test_console() -> Response:
         """Dev-only chat test console (serves the HTML with the admin key injected)."""

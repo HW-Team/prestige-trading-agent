@@ -236,6 +236,55 @@ async def test_access_approval_is_auditable(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_course_chat_enqueues_payment_qr_with_package(client: AsyncClient) -> None:
+    import hashlib
+    import hmac
+
+    payload = {
+        "object": "page",
+        "entry": [
+            {
+                "id": "108433865417846",
+                "time": 1720000000,
+                "messaging": [
+                    {
+                        "sender": {"id": "buyer-990"},
+                        "recipient": {"id": "108433865417846"},
+                        "timestamp": 1720000000000,
+                        "message": {
+                            "mid": "mid-qr-test-1",
+                            "text": "สนใจคอร์ส DCTS ฉบับเต็ม 3,990 บาทครับ",
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    sig = "sha256=" + hmac.new(b"meta-secret", body, hashlib.sha256).hexdigest()
+    resp = await client.post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": sig})
+    assert resp.status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    qr_jobs = [j for j in jobs if j["kind"] == "send_qr_image"]
+    assert len(qr_jobs) >= 1
+    assert qr_jobs[-1]["payload"]["package"] == "3990"
+    assert qr_jobs[-1]["payload"]["channel"] == "messenger"
+
+
+@pytest.mark.asyncio
+async def test_consult_coach_handoff_replies_with_line_oa(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/internal/chat",
+        json={"external_id": "consult-1", "message": "อยากคุยกับโค้ชโดยตรงครับ"},
+        headers={"X-API-Key": "admin-test"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "LINE OA" in data["reply"] or "lin.ee" in data["reply"]
+    assert data["next_state"] == "human_handoff"
+
+
+@pytest.mark.asyncio
 async def test_paid_event_advances_existing_course_funnel(client: AsyncClient) -> None:
     await client.post(
         "/internal/chat",

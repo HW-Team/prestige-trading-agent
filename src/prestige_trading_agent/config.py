@@ -39,7 +39,6 @@ class Settings(BaseSettings):
     telegram_chat_id: str | None = None
 
     # ---- Payment: PromptPay QR + bank (approved 2026-08-24) ----
-    payment_qr_url: str = "/assets/payment-qr.jpg"  # served by the app itself
     bank_name: str = "ธนาคารกสิกรไทย (KBank)"
     bank_account_name: str = "นาย รชต มากมูล"
     bank_account_number: str = "xxx-x-x6834-x"  # as printed on the official QR
@@ -66,6 +65,10 @@ class Settings(BaseSettings):
     # ---- Paid access: closed Facebook group (invite link per package, admin approves join) ----
     facebook_group_invite_990: str | None = None
     facebook_group_invite_3990: str | None = None
+
+    # ---- Payment QR ----
+    payment_qr_url: str = "/assets/payment-qr.jpg"
+    public_base_url: str = "https://agent.prestigetradingclub.com"
 
     # ---- EasySlip slip validation + QR generation ----
     easyslip_api_key: SecretStr | None = None

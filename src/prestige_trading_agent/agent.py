@@ -137,6 +137,23 @@ def _offline_route(prompt: str) -> AgentRoute:
             next_action=NextAction.SEND_FORM,
             rationale="newbie intent",
         )
+    if (
+        "คุยกับโค้ช" in lower
+        or "คุยกับคน" in lower
+        or "ปรึกษา" in lower
+        or "โค้ช" in lower
+        or "consult" in lower
+        or "coach" in lower
+        or "ติดต่อแอดมิน" in lower
+        or "อยากคุย" in lower
+    ):
+        return AgentRoute(
+            reply=SCENARIOS["consult_coach"]["reply"],
+            path=FunnelPath.COURSE,
+            next_state=FunnelState.HUMAN_HANDOFF,
+            next_action=NextAction.HUMAN_HANDOFF,
+            rationale="customer wants to talk to a human (coach/consultant)",
+        )
     return AgentRoute(
         reply=(
             "สวัสดีครับ ยินดีให้คำแนะนำเกี่ยวกับระบบ DCTS ค่ะ/ครับ "
