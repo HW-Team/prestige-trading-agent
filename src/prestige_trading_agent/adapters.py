@@ -210,9 +210,14 @@ class LiveAdapter:
             )
         elif kind is OutboxKind.SEND_PAID_ROOM:
             # Paid access = closed Facebook group. Meta deprecated the Groups
-            # member API, so we send the invite link and the customer joins;
-            # the group admin approves the join request manually.
-            link = self.settings.facebook_group_invite_url
+            # member API, so we send the invite link (per package) and the
+            # customer joins; the group admin approves the join request manually.
+            package = str(payload.get("package", "3990"))
+            link = (
+                self.settings.facebook_group_invite_990
+                if package == "990"
+                else self.settings.facebook_group_invite_3990
+            )
             msg = (
                 "ชำระเงินเรียบร้อยครับ 🎉 กรุณากรอกฟอร์มและกดเข้ากลุ่ม Facebook ปิดผ่านลิงก์นี้ "
                 f"{link} เจ้าหน้าที่จะอนุมัติภายใน 24 ชม. ครับ"

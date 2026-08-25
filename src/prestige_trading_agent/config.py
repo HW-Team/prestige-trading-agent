@@ -63,8 +63,9 @@ class Settings(BaseSettings):
     sheet_col_fb: int = 4
     sheet_col_slip: int = 12
 
-    # ---- Paid access: closed Facebook group (invite link, admin approves join) ----
-    facebook_group_invite_url: str | None = None
+    # ---- Paid access: closed Facebook group (invite link per package, admin approves join) ----
+    facebook_group_invite_990: str | None = None
+    facebook_group_invite_3990: str | None = None
 
     # ---- EasySlip slip validation + QR generation ----
     easyslip_api_key: SecretStr | None = None

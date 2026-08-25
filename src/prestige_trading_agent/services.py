@@ -377,6 +377,7 @@ async def process_stripe_event(session: AsyncSession, event: dict[str, Any]) -> 
                 {
                     "recipient_id": conv.external_thread_id,
                     "channel": conv.channel,
+                    "package": str(metadata.get("product", "3990")),
                 },
             )
     record.processed_at = datetime.now(UTC)
