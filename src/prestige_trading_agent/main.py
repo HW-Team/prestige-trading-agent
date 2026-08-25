@@ -452,7 +452,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         )
                     return out
 
-                rows = asyncio.get_event_loop().run_until_complete(asyncio.to_thread(_load))
+                rows = await asyncio.to_thread(_load)
             except Exception as exc:
                 error = f"Failed to read mem0 store: {exc}"
         rows.sort(key=lambda r: (r["user"], r["updated"]), reverse=True)
