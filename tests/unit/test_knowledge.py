@@ -49,8 +49,8 @@ def test_portfolio_claim_uses_3000_usd_not_100k_baht() -> None:
 
 
 def test_payment_forms_are_approved_google_forms() -> None:
-    assert PAYMENT_FORMS["990"] == "https://forms.gle/bjLjyFwxP96hiyF16"
-    assert PAYMENT_FORMS["3990"] == "https://forms.gle/hfTC9ukgNmk71uHv9"
+    assert PAYMENT_FORMS["990"] == "https://forms.gle/hfTC9ukgNmk71uHv9"
+    assert PAYMENT_FORMS["3990"] == "https://forms.gle/bjLjyFwxP96hiyF16"
     assert PAYMENT_FORMS["990"] in build_system_prompt()
     assert PAYMENT_FORMS["3990"] in build_system_prompt()
 

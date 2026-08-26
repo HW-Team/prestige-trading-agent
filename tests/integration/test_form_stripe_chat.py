@@ -104,14 +104,14 @@ async def test_payment_endpoint_returns_qr_and_form(client: AsyncClient) -> None
     data = resp.json()
     assert data["qr_image"] == "/assets/payment-qr.jpg"
     assert data["bank_account_name"] == "นาย รชต มากมูล"
-    assert data["form_url"] == "https://forms.gle/hfTC9ukgNmk71uHv9"
+    assert data["form_url"] == "https://forms.gle/bjLjyFwxP96hiyF16"
 
     resp990 = await client.post(
         "/internal/payment",
         json={"package": "990"},
         headers={"X-API-Key": "admin-test"},
     )
-    assert resp990.json()["form_url"] == "https://forms.gle/bjLjyFwxP96hiyF16"
+    assert resp990.json()["form_url"] == "https://forms.gle/hfTC9ukgNmk71uHv9"
 
 
 @pytest.mark.asyncio

@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     )
 
     # ---- Post-payment Google Forms (one per package) ----
-    form_990_url: str = "https://forms.gle/bjLjyFwxP96hiyF16"
-    form_3990_url: str = "https://forms.gle/hfTC9ukgNmk71uHv9"
+    form_990_url: str = "https://forms.gle/hfTC9ukgNmk71uHv9"
+    form_3990_url: str = "https://forms.gle/bjLjyFwxP96hiyF16"
 
     # ---- Google Sheets for cross-checking paid customers ----
     # Both are public "anyone with link" response sheets from the forms above.

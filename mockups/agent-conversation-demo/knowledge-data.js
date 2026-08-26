@@ -250,8 +250,8 @@ const KNOWLEDGE = {
   "lms": "https://prestigetradingclub.com/",
   "privacy_policy": "https://prestigetradingclub.com/privacy-policy",
   "terms": "https://prestigetradingclub.com/terms-of-service",
-  "form_990": "https://forms.gle/bjLjyFwxP96hiyF16",
-  "form_3990": "https://forms.gle/hfTC9ukgNmk71uHv9"
+  "form_990": "https://forms.gle/hfTC9ukgNmk71uHv9",
+  "form_3990": "https://forms.gle/bjLjyFwxP96hiyF16"
  },
  "response_rules": {
   "max_length": "3–5 ประโยค",
