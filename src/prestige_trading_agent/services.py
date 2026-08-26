@@ -264,36 +264,38 @@ async def ingest_message(
         )
         # When the customer reaches checkout, send the PromptPay QR image so
         # they can pay immediately in-chat. Fires on the AGENT's routing
-        # decision (SEND_CHECKOUT) or when the conversation is already at
-        # CHECKOUT_PENDING — NOT on the customer's message containing a price
-        # string (real customers say "สนใจครับ" / "ขอ qr หน่อยครับ" without
-        # ever typing "990"/"3990", which silently dropped the QR entirely).
+        # decision (SEND_CHECKOUT) or an explicit QR re-request ("ขอ qr" /
+        # "ยังไม่ได้รับ") — NOT on every message while CHECKOUT_PENDING, and
+        # NOT when the customer says they have already paid ("โอนไปแล้ว" /
+        # "ส่งสลิป"), which must ask for the slip instead of re-sending QR.
         # Package is read from the current turn (message or agent reply) and,
         # for re-requests, from earlier outbound replies in this conversation.
         # Deduped per customer+package on the auto-send; explicit re-requests
-        # ("ขอ qr" / "ยังไม่ได้รับ") get a fresh key so the QR actually resends.
-        if channel in {"messenger", "line"} and (
-            route.next_action is NextAction.SEND_CHECKOUT
-            or conversation.state is FunnelState.CHECKOUT_PENDING
-        ):
-            package = _extract_package(text, route.reply) or _extract_package(
-                *(m.text for m in prior_rows if m.direction == "outbound")
+        # get a fresh key so the QR actually resends.
+        if channel in {"messenger", "line"}:
+            asking_qr = any(
+                kw in text.lower() for kw in ("qr", "promptpay", "prompt pay")
             )
-            asking_again = any(
-                kw in text.lower() for kw in ("qr", "promptpay", "prompt pay", "โอน", "สลิป", "จ่าย")
+            already_paid = any(
+                kw in text.lower()
+                for kw in ("โอนไปแล้ว", "โอนแล้ว", "โอนเงินแล้ว", "ส่งสลิป", "สลิปแล้ว", "จ่ายแล้ว")
             )
-            if package is not None:
-                dedupe = (
-                    f"qr:{external_id}:{package}"
-                    if not asking_again
-                    else f"qr:{external_id}:{package}:{message_id}"
+            if (route.next_action is NextAction.SEND_CHECKOUT or asking_qr) and not already_paid:
+                package = _extract_package(text, route.reply) or _extract_package(
+                    *(m.text for m in prior_rows if m.direction == "outbound")
                 )
-                await enqueue(
-                    session,
-                    OutboxKind.SEND_QR_IMAGE,
-                    dedupe,
-                    {"recipient_id": external_id, "channel": channel, "package": package},
-                )
+                if package is not None:
+                    dedupe = (
+                        f"qr:{external_id}:{package}"
+                        if not asking_qr
+                        else f"qr:{external_id}:{package}:{message_id}"
+                    )
+                    await enqueue(
+                        session,
+                        OutboxKind.SEND_QR_IMAGE,
+                        dedupe,
+                        {"recipient_id": external_id, "channel": channel, "package": package},
+                    )
     return route, False, outbound_id
 
 

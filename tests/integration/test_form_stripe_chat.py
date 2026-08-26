@@ -329,6 +329,26 @@ async def test_qr_sent_when_customer_never_mentions_price(client: AsyncClient) -
     msg = f"explicit re-request must enqueue a fresh QR job, got {len(qr_jobs2)}"
     assert len(qr_jobs2) == 2, msg
 
+    # Turn 3: customer says they already transferred — must NOT re-send the QR
+    # (it should ask for the slip instead). Job count must stay at 2.
+    body3, sig3 = _meta_msg("buyer-noprice", "mid-qr-noprice-3", "โอนไปแล้วครับ")
+    resp3 = await client.post(
+        "/webhooks/meta", content=body3, headers={"X-Hub-Signature-256": sig3}
+    )
+    assert resp3.status_code == 200
+    jobs3 = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    qr_jobs3 = [
+        j for j in jobs3
+        if j["kind"] == "send_qr_image" and j["payload"]["recipient_id"] == "buyer-noprice"
+    ]
+    msg3 = f"already-paid message must NOT enqueue another QR, got {len(qr_jobs3)}"
+    assert len(qr_jobs3) == 2, msg3
+    replies = [
+        j for j in jobs3
+        if j["kind"] == "send_message" and j["payload"]["recipient_id"] == "buyer-noprice"
+    ]
+    assert "สลิป" in replies[-1]["payload"]["text"], "reply must ask for the slip"
+
 
 @pytest.mark.asyncio
 async def test_qr_reroute_no_wrong_amount_when_package_unknown(client: AsyncClient) -> None:

@@ -158,7 +158,7 @@ def _offline_route(prompt: str) -> AgentRoute:
     # intent — they want the payment QR. Keep the funnel at checkout so the
     # QR enqueue (services) fires on the state; SEND_CHECKOUT re-prompts it.
     if any(
-        kw in lower for kw in ("qr", "promptpay", "prompt pay", "โอน", "สลิป", "จ่าย")
+        kw in lower for kw in ("qr", "promptpay", "prompt pay", "ขอ qr", "ส่ง qr", "ยังไม่ได้รับ")
     ):
         return AgentRoute(
             reply=SCENARIOS["course_checkout"]["reply"],
@@ -166,6 +166,20 @@ def _offline_route(prompt: str) -> AgentRoute:
             next_state=FunnelState.CHECKOUT_PENDING,
             next_action=NextAction.SEND_CHECKOUT,
             rationale="customer asks for payment QR while at checkout",
+        )
+    # Customer says they already paid / sends a slip: do NOT re-send the QR —
+    # ask for the slip image so the payment can be verified. Stays at checkout
+    # (waiting for the slip); no QR job and no handoff at this stage.
+    if any(
+        kw in lower
+        for kw in ("โอนไปแล้ว", "โอนแล้ว", "โอนเงินแล้ว", "ส่งสลิป", "สลิปแล้ว", "จ่ายแล้ว")
+    ):
+        return AgentRoute(
+            reply=SCENARIOS["course_checkout"]["slip_request"],
+            path=FunnelPath.COURSE,
+            next_state=FunnelState.CHECKOUT_PENDING,
+            next_action=NextAction.NONE,
+            rationale="customer says paid - request slip for verification",
         )
     return AgentRoute(
         reply=(
