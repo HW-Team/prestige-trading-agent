@@ -617,18 +617,35 @@ async def handle_slip_image(
     )
     if conversation is None:
         return
-    # Determine package from the conversation's recent context (default 3990).
-    package = "3990"
-    result = await validate_slip_with_easyslip(session, settings, slip_image_url=image_url)
+    # Determine package from the conversation's recent context — the bot's own
+    # checkout replies always name the price (990/3,990), so scan the last few
+    # turns. Defaults to 3990 (full version) if nothing names a price.
+    recent_rows = (
+        await session.scalars(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation.id,
+                Message.direction == "outbound",
+            )
+            .order_by(Message.created_at.desc())
+            .limit(6)
+        )
+    ).all()
+    package = _extract_package(*(m.text for m in recent_rows)) or "3990"
+    expected = "990" if package == "990" else "3990"
+    result = await validate_slip_with_easyslip(
+        session, settings, slip_image_url=image_url, expected_amount=expected
+    )
     if not result["ok"]:
+        sheet_id = settings.sheet_990_id if package == "990" else settings.sheet_3990_id
         result = await crosscheck_google_sheet(
             session,
             settings,
-            sheet_id=settings.sheet_3990_id,
+            sheet_id=sheet_id,
             external_id=external_id,
         )
         if result["ok"]:
-            package = "3990"
+            package = package
     if not result["ok"]:
         await enqueue(
             session,
@@ -638,7 +655,8 @@ async def handle_slip_image(
                 "recipient_id": external_id,
                 "channel": "messenger",
                 "text": (
-                    "ขออภัยครับ ตรวจสอบสลิปไม่พบรายการโอนในระบบ "
+                    "ขออภัยครับ ตรวจสอบสลิปไม่พบรายการโอนที่ถูกต้องในระบบ "
+                    "(ยอดเงินไม่ตรงกับแพ็กเกจหรือไม่พบรายการ) "
                     "กรุณาส่งสลิปโอนเงินอีกครั้ง หรือแจ้งชื่อ-นามสกุลที่โอน "
                     "ให้เจ้าหน้าที่ตรวจสอบให้ครับ"
                 ),
