@@ -92,7 +92,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.database = database
         app.state.agent = agent
         app.state.adapter = adapter
-        logger.info("service_started", environment=config.environment)
+        logger.info(
+            "service_started",
+            environment=config.environment,
+            database_url=config.database_url,
+            outbound_mode=config.outbound_mode,
+        )
 
         # Outbox worker: poll for pending jobs and dispatch them (Messenger /
         # LINE sends, LMS enroll, access provisioning). In "recording" mode the
