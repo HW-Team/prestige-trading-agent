@@ -71,8 +71,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if config.environment != "production":
+        import asyncio
+
+        # Schema bootstrap: SQLite (dev/tests) uses create_all — fast and
+        # idempotent; Postgres (production) runs Alembic migrations so schema
+        # stays in sync as migrations evolve. Alembic on SQLite also works but
+        # spins its own event loop, so keep tests on create_all.
+        if config.database_url.startswith("sqlite"):
             await database.create_schema()
+        else:
+            from alembic import command
+            from alembic.config import Config as AlembicConfig
+
+            def _run_migrations() -> None:
+                alembic_cfg = AlembicConfig("alembic.ini")
+                alembic_cfg.set_main_option("sqlalchemy.url", config.database_url)
+                command.upgrade(alembic_cfg, "head")
+
+            await asyncio.to_thread(_run_migrations)
         app.state.database = database
         app.state.agent = agent
         app.state.adapter = adapter
