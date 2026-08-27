@@ -77,6 +77,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # idempotent; Postgres (production) runs Alembic migrations so schema
         # stays in sync as migrations evolve. Alembic on SQLite also works but
         # spins its own event loop, so keep tests on create_all.
+        # Migrations run in a background task: a slow first-boot migration
+        # must never block startup and fail Coolify's healthcheck (which
+        # caused container rollback and kept the app on the old SQLite).
         if config.database_url.startswith("sqlite"):
             await database.create_schema()
         else:
@@ -88,7 +91,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 alembic_cfg.set_main_option("sqlalchemy.url", config.database_url)
                 command.upgrade(alembic_cfg, "head")
 
-            await asyncio.to_thread(_run_migrations)
+            async def _migrate_bg() -> None:
+                try:
+                    await asyncio.to_thread(_run_migrations)
+                    logger.info("alembic_upgrade_done")
+                except Exception as exc:
+                    # Never crash the app over schema bootstrap; the agent
+                    # surfaces DB errors on the endpoints that need tables.
+                    logger.warning("alembic_upgrade_failed", error=str(exc))
+
+            app.state.migration_task = asyncio.create_task(_migrate_bg())
         app.state.database = database
         app.state.agent = agent
         app.state.adapter = adapter
