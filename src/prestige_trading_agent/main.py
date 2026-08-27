@@ -71,7 +71,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        import asyncio
 
         # Schema bootstrap: SQLite (dev/tests) uses create_all — fast and
         # idempotent; Postgres (production) runs Alembic migrations so schema
@@ -101,6 +100,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     logger.warning("alembic_upgrade_failed", error=str(exc))
 
             app.state.migration_task = asyncio.create_task(_migrate_bg())
+        # Preload mem0 (embedding model download) in the background so the
+        # first customer webhook is never blocked by a 30s+ model fetch.
+        from prestige_trading_agent.memory import preload_memory
+
+        app.state.memory_preload_task = asyncio.create_task(preload_memory())
         app.state.database = database
         app.state.agent = agent
         app.state.adapter = adapter

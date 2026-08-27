@@ -20,6 +20,11 @@ import structlog
 logger = structlog.get_logger()
 
 _MEMORY: Any | None = None
+# Set True only after the background preload finished building mem0. Request
+# paths check this so they never trigger the embedding-model download
+# themselves (which blocked the first webhook for 30s+); they just skip memory
+# until preload completes.
+_MEMORY_READY = False
 
 
 def _build_memory() -> Any | None:
@@ -75,8 +80,35 @@ def get_memory() -> Any | None:
     return _MEMORY
 
 
+async def preload_memory() -> None:
+    """Build the mem0 Memory object in a background task at startup.
+
+    First build downloads the embedding model (fastembed BAAI/bge-small-en-v1.5)
+    from HuggingFace, which can take 30s+ and would otherwise block the first
+    customer webhook (503 / timeout). Preloading keeps requests fast and lets
+    the funnel work even while the model downloads.
+    """
+    import asyncio
+
+    def _build() -> None:
+        global _MEMORY_READY
+        try:
+            get_memory()
+            _MEMORY_READY = True
+            logger.info("mem0_preloaded")
+        except Exception as exc:
+            logger.warning("mem0_preload_failed", error=str(exc))
+
+    try:
+        await asyncio.to_thread(_build)
+    except Exception as exc:
+        logger.warning("mem0_preload_task_failed", error=str(exc))
+
+
 async def remember(external_id: str, text: str) -> None:
     """Store a customer message into long-term memory (never breaks the funnel)."""
+    if not _MEMORY_READY:
+        return
     try:
         memory = get_memory()
         if memory is None:
@@ -91,6 +123,8 @@ async def remember(external_id: str, text: str) -> None:
 
 async def recall(external_id: str, query: str) -> str:
     """Return a compact summary of what mem0 remembers about this customer."""
+    if not _MEMORY_READY:
+        return ""
     try:
         memory = get_memory()
         if memory is None:
