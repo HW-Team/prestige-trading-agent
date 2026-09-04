@@ -572,7 +572,11 @@ filter();
         Call this when a customer picks a package. 990 → form_990_url,
         3990 → form_3990_url. Always returns the approved QR image URL.
         """
-        form_url = config.form_3990_url if payload.package == "3990" else config.form_990_url
+        form_url = {
+            "990": config.form_990_url,
+            "3990": config.form_3990_url,
+            "1580": config.form_1580_url,
+        }.get(payload.package, config.form_990_url)
         return {
             "qr_image": config.payment_qr_url,
             "bank_name": config.bank_name,

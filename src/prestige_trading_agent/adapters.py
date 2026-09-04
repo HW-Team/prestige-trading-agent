@@ -243,7 +243,7 @@ class LiveAdapter:
         recipient_id = str(payload["recipient_id"])
         channel = str(payload.get("channel", "messenger"))
         package = str(payload.get("package", "3990"))
-        amount = 990.0 if package == "990" else 3990.0
+        amount = {"990": 990.0, "3990": 3990.0, "1580": 1580.0}.get(package, 3990.0)
 
         image_url = self.settings.payment_qr_url
         qr_file = Path(f"/data/qr-{package}.png")
@@ -286,11 +286,11 @@ class LiveAdapter:
             # member API, so we send the invite link (per package) and the
             # customer joins; the group admin approves the join request manually.
             package = str(payload.get("package", "3990"))
-            link = (
-                self.settings.facebook_group_invite_990
-                if package == "990"
-                else self.settings.facebook_group_invite_3990
-            )
+            link = {
+                "990": self.settings.facebook_group_invite_990,
+                "3990": self.settings.facebook_group_invite_3990,
+                "1580": self.settings.facebook_group_invite_1580,
+            }.get(package) or self.settings.facebook_group_invite_3990
             msg = (
                 "ชำระเงินเรียบร้อยครับ 🎉 กรุณากรอกฟอร์มและกดเข้ากลุ่ม Facebook ปิดผ่านลิงก์นี้ "
                 f"{link} เจ้าหน้าที่จะอนุมัติภายใน 24 ชม. ครับ"

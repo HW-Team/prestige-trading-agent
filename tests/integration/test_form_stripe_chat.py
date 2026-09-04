@@ -368,6 +368,23 @@ async def test_qr_reroute_no_wrong_amount_when_package_unknown(client: AsyncClie
 
 
 @pytest.mark.asyncio
+async def test_promo_1580_qr_sent_on_focus_group_interest(client: AsyncClient) -> None:
+    """The temporary 1,580 promo (Focus Group Coaching) must reach checkout and
+    fire a QR for the promo amount — not silently route to coach-handoff
+    (whose "coach" keyword would match "coaching")."""
+    body, sig = _meta_msg("promo-1580-buyer", "mid-promo-1580-1", "สนใจโปรชัน Focus Group Coaching 1,580 ครับ")
+    resp = await client.post("/webhooks/meta", content=body, headers={"X-Hub-Signature-256": sig})
+    assert resp.status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    qr_jobs = [
+        j for j in jobs
+        if j["kind"] == "send_qr_image" and j["payload"]["recipient_id"] == "promo-1580-buyer"
+    ]
+    assert len(qr_jobs) == 1, f"promo interest must enqueue one QR, got {len(qr_jobs)}"
+    assert qr_jobs[0]["payload"]["package"] == "1580"
+
+
+@pytest.mark.asyncio
 async def test_consult_coach_handoff_replies_with_line_oa(client: AsyncClient) -> None:
     resp = await client.post(
         "/internal/chat",

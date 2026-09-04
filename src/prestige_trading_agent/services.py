@@ -31,15 +31,20 @@ class InvalidTransition(ValueError):
 
 
 def _extract_package(*texts: str) -> str | None:
-    """Return the DCTS package (990|3990) mentioned in any text, or None.
+    """Return the DCTS package (990|3990|1580) mentioned in any text, or None.
 
     Checks full-version markers first because "990" is a substring of
     "3,990" — a bare "990" match would misclassify the full package.
+    The temporary promo (1,580 = กิจกรรม Focus Group Coaching 1 เดือน +
+    DCTS ฉบับรวบรัด) is checked before "990" so "1,580" never falls through
+    to the condensed course.
     """
     for t in texts:
         low = t.lower()
         if "3,990" in low or "3990" in low or "ฉบับเต็ม" in low or "เต็ม" in low:
             return "3990"
+        if "1,580" in low or "1580" in low or "590" in low or "focus group" in low:
+            return "1580"
         if "990" in low:
             return "990"
     return None
@@ -632,18 +637,27 @@ async def handle_slip_image(
         )
     ).all()
     package = _extract_package(*(m.text for m in recent_rows)) or "3990"
-    expected = "990" if package == "990" else "3990"
+    expected = {"990": "990", "3990": "3990", "1580": "1580"}.get(package, "3990")
     result = await validate_slip_with_easyslip(
         session, settings, slip_image_url=image_url, expected_amount=expected
     )
     if not result["ok"]:
-        sheet_id = settings.sheet_990_id if package == "990" else settings.sheet_3990_id
-        result = await crosscheck_google_sheet(
-            session,
-            settings,
-            sheet_id=sheet_id,
-            external_id=external_id,
-        )
+        # Sheet cross-check exists only for the two standard courses; the
+        # temporary 1,580 promo has no response sheet, so EasySlip is the only
+        # source of truth for it.
+        if package == "990":
+            sheet_id = settings.sheet_990_id
+        elif package == "3990":
+            sheet_id = settings.sheet_3990_id
+        else:
+            sheet_id = None
+        if sheet_id:
+            result = await crosscheck_google_sheet(
+                session,
+                settings,
+                sheet_id=sheet_id,
+                external_id=external_id,
+            )
         if result["ok"]:
             package = package
     if not result["ok"]:

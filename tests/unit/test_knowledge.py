@@ -17,6 +17,7 @@ from prestige_trading_agent.knowledge import (
     HANDOFF_RULES,
     PACKAGES,
     PAYMENT_FORMS,
+    PROMO_1580,
     PUBLIC_LINKS,
     SCENARIOS,
     SEGMENTS,
@@ -38,6 +39,18 @@ def test_two_approved_packages_with_exact_prices() -> None:
     assert PACKAGES[1].price == "3,990 บาท"
     for pkg in PACKAGES:
         assert "การันตี" in pkg.conditions  # every package reminds no-guarantee
+
+
+def test_temporary_promo_1580_is_separate_and_marked_temporary() -> None:
+    """The Focus Group Coaching promo (1,580) is NOT a permanent package — it
+    lives separately, is clearly marked temporary, and targets existing course
+    students only (never new leads)."""
+    assert PROMO_1580.key == "focus-group-promo"
+    assert PROMO_1580.price == "1,580 บาท"
+    assert "ชั่วคราว" in PROMO_1580.name or "ชั่วคราว" in PROMO_1580.conditions
+    assert "เรียนคอร์ส" in PROMO_1580.audience or "ในคอร์ส" in PROMO_1580.audience
+    assert "การันตี" in PROMO_1580.conditions
+    assert "1580" in PAYMENT_FORMS
 
 
 def test_portfolio_claim_uses_3000_usd_not_100k_baht() -> None:

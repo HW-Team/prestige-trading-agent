@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
 
+    # ---- Temporary promo (ชั่วคราว): Focus Group Coaching 1 เดือน ราคา 1,580 ----
+    # Set PRESTIGE_PROMO_1580_ACTIVE=false (or an ISO end date in
+    # PRESTIGE_PROMO_1580_UNTIL) to stop the bot offering the promo — it then
+    # pitches only the two standard packages (990/3,990).
+    promo_1580_active: bool = True
+    promo_1580_until: str | None = None
+
     # ---- Payment: PromptPay QR + bank (approved 2026-08-24) ----
     bank_name: str = "ธนาคารกสิกรไทย (KBank)"
     bank_account_name: str = "นาย รชต มากมูล"
@@ -50,6 +57,8 @@ class Settings(BaseSettings):
     # ---- Post-payment Google Forms (one per package) ----
     form_990_url: str = "https://forms.gle/hfTC9ukgNmk71uHv9"
     form_3990_url: str = "https://forms.gle/bjLjyFwxP96hiyF16"
+    # โปรชันชั่วคราว (Focus Group Coaching 1 เดือน) — ฟอร์มลงทะเบียนกิจกรรม
+    form_1580_url: str = "https://forms.gle/4voumeTBqC5dC8Rx9"
 
     # ---- Google Sheets for cross-checking paid customers ----
     # Both are public "anyone with link" response sheets from the forms above.
@@ -65,6 +74,8 @@ class Settings(BaseSettings):
     # ---- Paid access: closed Facebook group (invite link per package, admin approves join) ----
     facebook_group_invite_990: str | None = None
     facebook_group_invite_3990: str | None = None
+    # Focus Group Coaching 1 เดือน (โปรชันชั่วคราว) — ทีมอาจใช้กลุ่มเฉพาะของกิจกรรม
+    facebook_group_invite_1580: str | None = None
 
     # ---- Payment QR ----
     payment_qr_url: str = "/assets/payment-qr.jpg"

@@ -135,6 +135,58 @@ PACKAGES: tuple[Package, ...] = (
     ),
 )
 
+# โปรชันชั่วคราว (temporary promo) — NOT part of the standard PACKAGES tuple.
+# Pitched only while enabled (config.promo_1580_active / promo_1580_until);
+# the standard catalog above stays stable and tests lock it at exactly two.
+PROMO_1580: Package = Package(
+    key="focus-group-promo",
+    name="โปรชันชั่วคราว: กิจกรรม Focus Group Coaching 1 เดือน + DCTS ฉบับรวบรัด",
+    price="1,580 บาท",
+    billing="จ่ายครั้งเดียว (โปรชันชั่วคราว ราคาพิเศษจากปกติ 1,890 บาท)",
+    audience=(
+        "สำหรับนักเรียนที่เรียนคอร์ส DCTS ไปแล้วเท่านั้น "
+        "(ไม่เสนอให้คนที่ยังไม่เคยเรียนคอร์ส — ให้เสนอ 990/3,990 แทน)"
+    ),
+    includes=(
+        "กิจกรรม Focus Group Coaching 1 เดือน 'ปั้นพอร์ต 500$ ไปสู่ 5,000$' "
+        "แบบกลุ่มเล็ก + คอร์ส DCTS ฉบับรวบรัด (เนื้อหาอัปเดตล่าสุด)"
+    ),
+    trial="ไม่มีทดลองฟรี",
+    bonus="เข้ากลุ่มโค้ชชิ่ง Focus Group ระยะเวลา 1 เดือน กับทีมโค้ช",
+    access="สิทธิ์เข้าร่วมกิจกรรม 1 เดือน (โปรชันชั่วคราว — สิ้นสุดเมื่อทีมประกาศ)",
+    conditions=(
+        "เป็นโปรชันชั่วคราว เฉพาะนักเรียนในคอร์ส DCTS เท่านั้น "
+        "ราคา/สิทธิ์อาจเปลี่ยนแปลงเมื่อโปรชันสิ้นสุด "
+        "ผลลัพธ์ขึ้นอยู่กับวินัยและการทำตามระบบ ไม่การันตีกำไร"
+    ),
+    checkout="ส่ง QR PromptPay + เลขบัญชีให้ลูกค้าโอนเงินได้เลย (ไม่ต้องให้ติดต่อ LINE OA)",
+)
+
+PACKAGE_BY_PRICE: dict[str, str] = {"990": "990", "3990": "3990", "1580": "1580"}
+
+
+def promo_1580_enabled() -> bool:
+    """True while the temporary 1,580 promo may be offered.
+
+    Reads live settings (env PRESTIGE_PROMO_1580_ACTIVE / PRESTIGE_PROMO_1580_UNTIL)
+    so the promo can be switched off without a code change.
+    """
+    from prestige_trading_agent.config import get_settings
+
+    settings = get_settings()
+    if not settings.promo_1580_active:
+        return False
+    if settings.promo_1580_until:
+        from datetime import date
+
+        try:
+            until = date.fromisoformat(settings.promo_1580_until)
+        except ValueError:
+            return True
+        if date.today() > until:
+            return False
+    return True
+
 FINANCIAL_POLICY = (
     "ไม่มีนโยบายคืนเงินเนื่องจากเป็นคอร์สออนไลน์ดิจิทัล เว้นแต่กรณีระบบขัดข้องหรือชำระเงินซ้ำซ้อน; "
     "ไม่มีระบบ Subscription; อัปเกรดจากฉบับรวบรัด 990 บาท เป็นฉบับเต็ม 3,990 บาท ได้โดยติดต่อแอดมินชำระส่วนต่าง; "
@@ -490,6 +542,9 @@ PUBLIC_LINKS: dict[str, str] = {
 PAYMENT_FORMS: dict[str, str] = {
     "990": "https://forms.gle/hfTC9ukgNmk71uHv9",
     "3990": "https://forms.gle/bjLjyFwxP96hiyF16",
+    # โปรชันชั่วคราว Focus Group Coaching 1 เดือน (ฟอร์มลงทะเบียนกิจกรรม —
+    # ทีมส่งให้ลูกค้าในแชท 2026-09)
+    "1580": "https://forms.gle/4voumeTBqC5dC8Rx9",
 }
 
 # ---------------------------------------------------------------------------
@@ -557,6 +612,16 @@ def _package_block() -> str:
             f"  เงื่อนไข: {p.conditions}\n"
             f"  ช่องทาง: {p.checkout}"
         )
+    if promo_1580_enabled():
+        p = PROMO_1580
+        lines.append(
+            f"- [โปรชันชั่วคราว] {p.name} | {p.price} | {p.billing}\n"
+            f"  เหมาะกับ: {p.audience}\n"
+            f"  ได้รับ: {p.includes}\n"
+            f"  ทดลอง: {p.trial} | โบนัส: {p.bonus} | สิทธิ์: {p.access}\n"
+            f"  เงื่อนไข: {p.conditions}\n"
+            f"  ช่องทาง: {p.checkout}"
+        )
     return "\n".join(lines)
 
 
@@ -614,9 +679,15 @@ Privacy: {PUBLIC_LINKS["privacy_policy"]} | Terms: {PUBLIC_LINKS["terms"]}
 - เมื่อลูกค้าบอกว่า "โอนไปแล้ว / โอนแล้ว / ส่งสลิป" ให้ขอสลิปการโอนเงิน (รูปภาพ) เพื่อตรวจสอบ — ห้ามส่ง QR ซ้ำอีก และห้ามสรุปว่าชำระแล้วจนกว่าระบบตรวจสอบสลิปผ่าน
 - แพ็กเกจ 990 บาท: หลังตรวจสอบสลิปผ่าน ให้ส่งฟอร์ม {PAYMENT_FORMS["990"]}
 - แพ็กเกจ 3,990 บาท: หลังตรวจสอบสลิปผ่าน ให้ส่งฟอร์ม {PAYMENT_FORMS["3990"]}
+- โปรชันชั่วคราว 1,580 บาท (กิจกรรม Focus Group Coaching 1 เดือน + DCTS ฉบับรวบรัด): หลังตรวจสอบสลิปผ่าน ให้ส่งฟอร์ม {PAYMENT_FORMS["1580"]}
 - ฟอร์มให้ลูกค้ากรอกชื่อ Facebook เพื่อใช้เข้ากลุ่มปิด (Facebook group) สำหรับดูย้อนหลัง
 - หลังลูกค้าส่งสลิป: บอกว่า "ได้รับสลิปแล้ว กำลังตรวจสอบ เจ้าหน้าที่จะยืนยันภายใน 15 นาทีครับ" และส่งต่อแอดมิน
 - เมื่อสลิปผ่านการตรวจสอบ: แจ้งลูกค้า "ชำระเงินเรียบร้อย กรุณากรอกฟอร์มตามลิงก์ และกดเข้ากลุ่ม Facebook ปิดผ่านลิงก์ที่ส่งให้ เจ้าหน้าที่จะอนุมัติภายใน 24 ชม." (กลุ่มเป็น Facebook group — ส่งลิงก์ invite ให้ลูกค้ากดเข้ากลุ่มเอง แอดมินกดอนุมัติ)
+
+# โปรชันชั่วคราว (1,580 บาท)
+- โปรชันนี้ "สำหรับนักเรียนในคอร์สเท่านั้น" — อย่าเสนอโปรชันนี้ให้ลูกค้าใหม่/ยังไม่เคยเรียนคอร์ส ให้เสนอ 990/3,990 ปกติแทน
+- ถ้าลูกค้าเป็นนักเรียนในคอร์สแล้วและถามถึง "โปรชัน/กิจกรรม Focus Group/1,580/รับข้อเสนอ" จึงค่อยเสนอได้
+- เป็นโปรชันชั่วคราว ราคา/สิทธิ์อาจเปลี่ยนแปลงเมื่อโปรชันสิ้นสุด
 
 # ขอบเขตและความปลอดภัย
 - เมื่อไม่รู้คำตอบ: {RESPONSE_RULES["unknown_reply"]} และส่งต่อแอดมิน

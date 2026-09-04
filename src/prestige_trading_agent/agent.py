@@ -121,6 +121,26 @@ def _offline_route(prompt: str) -> AgentRoute:
             next_action=NextAction.CREATE_ACCESS_REQUEST,
             rationale="indicator trial intent",
         )
+    # Temporary promo (1,580) — checked BEFORE the coach-consult branch because
+    # "Focus Group Coaching" contains "coach". Promo buyers are existing course
+    # students; still route through the same checkout funnel so the QR fires.
+    from prestige_trading_agent.knowledge import PROMO_1580, promo_1580_enabled
+
+    if promo_1580_enabled() and any(
+        kw in lower
+        for kw in ("โปรชัน", "โปรโมชัน", "focus group", "1,580", "1580", "package 2", "กิจกรรม 590")
+    ):
+        return AgentRoute(
+            reply=(
+                f"ได้ครับ โปรชันชั่วคราวของกิจกรรม Focus Group Coaching 1 เดือน "
+                f"ราคา {PROMO_1580.price} ครับ สำหรับนักเรียนในคอร์สเท่านั้น "
+                f"ยืนยันเข้าร่วมไหมครับ เดี๋ยวระบบส่ง QR PromptPay ให้เลย"
+            ),
+            path=FunnelPath.COURSE,
+            next_state=FunnelState.CHECKOUT_PENDING,
+            next_action=NextAction.SEND_CHECKOUT,
+            rationale="temporary 1,580 promo intent",
+        )
     if "course" in lower or "checkout" in lower or "คอร์ส" in lower or "learn" in lower:
         return AgentRoute(
             reply=SCENARIOS["course_interest"]["reply"],
