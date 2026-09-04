@@ -132,6 +132,7 @@ class OutboxJob(TimestampMixin, Base):
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
 
 
 class Feedback(TimestampMixin, Base):
