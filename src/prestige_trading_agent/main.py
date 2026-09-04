@@ -248,9 +248,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         x_hub_signature_256: str = Header(default=""),
     ) -> dict[str, Any]:
         body = await request.body()
-        if not _verify_hmac(
+        sig_ok = _verify_hmac(
             config.meta_app_secret.get_secret_value(), body, x_hub_signature_256, "sha256="
-        ):
+        )
+        logger.info(
+            "meta_webhook_received",
+            bytes_in=len(body),
+            signature_present=bool(x_hub_signature_256),
+            signature_valid=sig_ok,
+        )
+        if not sig_ok:
             raise HTTPException(status_code=401, detail="Invalid Meta signature")
         try:
             payload: dict[str, Any] = json.loads(body)
@@ -273,6 +280,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 sender = str((item.get("sender") or {}).get("id", ""))
                 message_id = str(message.get("mid", ""))
                 postback = item.get("postback")
+                logger.info(
+                    "meta_webhook_item",
+                    sender=sender,
+                    message_id=message_id,
+                    is_echo=message.get("is_echo"),
+                    text=str(message.get("text", ""))[:120],
+                    postback_title=str((postback or {}).get("title", ""))[:80],
+                )
                 offer_accept = (
                     "รับข้อเสนอ" in str(message.get("text", ""))
                     or "get offers" in str(message.get("text", "")).lower()
