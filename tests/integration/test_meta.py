@@ -89,10 +89,9 @@ async def test_lead_ad_converges_and_invalid_signature_rejected(client: AsyncCli
 
 @pytest.mark.asyncio
 async def test_postback_button_tap_gets_reply(client: AsyncClient) -> None:
-    """Regression: a customer tapping a button ("Get started" / "รับข้อเสนอ" /
-    ad offer CTA) sends a postback with NO message.mid. The old handler
-    silently skipped it, so that customer never got a reply. A postback must
-    enter the funnel like a normal message."""
+    """Regression: a customer tapping a button ("Get started") sends a postback
+    with NO message.mid. The old handler silently skipped it, so that customer
+    never got a reply. A postback must enter the funnel like a normal message."""
     payload = {
         "object": "page",
         "entry": [
@@ -104,7 +103,7 @@ async def test_postback_button_tap_gets_reply(client: AsyncClient) -> None:
                         "sender": {"id": "postback-buyer"},
                         "recipient": {"id": "108433865417846"},
                         "timestamp": 1720000000000,
-                        "postback": {"title": "รับข้อเสนอ", "payload": "GET_STARTED"},
+                        "postback": {"title": "เริ่มต้นใช้งาน", "payload": "GET_STARTED"},
                     }
                 ],
             }
@@ -116,6 +115,38 @@ async def test_postback_button_tap_gets_reply(client: AsyncClient) -> None:
     jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
     mine = [j for j in jobs if j.get("payload", {}).get("recipient_id") == "postback-buyer"]
     assert any(j["kind"] == "send_message" for j in mine), "postback tap must get a bot reply"
+
+
+@pytest.mark.asyncio
+async def test_offer_accept_postback_is_ignored(client: AsyncClient) -> None:
+    """A "รับข้อเสนอ / Get offers" tap is accepting a Meta AD OFFER, not real
+    buying intent — the bot must NOT reply (no pitch, no QR) to those."""
+    for title in ("รับข้อเสนอ", "Get offers"):
+        payload = {
+            "object": "page",
+            "entry": [
+                {
+                    "id": "108433865417846",
+                    "time": 1720000000,
+                    "messaging": [
+                        {
+                            "sender": {"id": f"offer-{title}"},
+                            "recipient": {"id": "108433865417846"},
+                            "timestamp": 1720000000000,
+                            "postback": {"title": title, "payload": "OFFER_ACCEPT"},
+                        }
+                    ],
+                }
+            ],
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {"X-Hub-Signature-256": signature(body), "Content-Type": "application/json"}
+        assert (
+            await client.post("/webhooks/meta", content=body, headers=headers)
+        ).status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    offer_jobs = [j for j in jobs if j.get("payload", {}).get("recipient_id", "").startswith("offer-")]
+    assert offer_jobs == [], "ad offer-accept taps must not trigger any reply"
 
 
 @pytest.mark.asyncio

@@ -261,16 +261,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for item in entry.get("messaging", []):
                 # Two event shapes carry user intent into the funnel:
                 #  1) message  — a text/image the customer typed (has a mid)
-                #  2) postback — a button tap ("Get started" / "รับข้อเสนอ" /
-                #     ad offer CTA). Postbacks have NO message.mid, so the old
-                #     guard silently dropped them — those customers never got
-                #     a reply. Treat a postback as a normal funnel message.
+                #  2) postback — a button tap ("Get started" / ad CTA).
+                #     Postbacks have NO message.mid, so the old guard silently
+                #     dropped them — those customers never got a reply.
+                #     EXCEPTION: "รับข้อเสนอ / Get offers" (accepting a Meta ad
+                #     offer) is NOT real buying intent — those taps are ignored
+                #     so the bot doesn't pitch/QR-spam offer-accepters.
                 message = item.get("message") or {}
                 sender = str((item.get("sender") or {}).get("id", ""))
                 message_id = str(message.get("mid", ""))
-                if item.get("postback"):
+                postback = item.get("postback")
+                if postback:
+                    pb_title = str(postback.get("title", "") or "")
+                    pb_payload = str(postback.get("payload", "") or "")
+                    if "รับข้อเสนอ" in pb_title or "get offers" in pb_title.lower():
+                        # Meta ad-offer acceptance: not real interest — skip.
+                        continue
                     message_id = f"postback:{sender}:{item.get('timestamp', '')}"
-                    text = str((item.get("postback") or {}).get("title", "") or "")
+                    text = pb_title
                     if not text:
                         # Some CTAs carry only a payload (e.g. the ad offer
                         # button) — still answer so the lead isn't dropped.
