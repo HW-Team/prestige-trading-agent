@@ -118,10 +118,17 @@ async def test_postback_button_tap_gets_reply(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_offer_accept_postback_is_ignored(client: AsyncClient) -> None:
-    """A "รับข้อเสนอ / Get offers" tap is accepting a Meta AD OFFER, not real
-    buying intent — the bot must NOT reply (no pitch, no QR) to those."""
-    for title in ("รับข้อเสนอ", "Get offers"):
+async def test_offer_accept_is_ignored_all_shapes(client: AsyncClient) -> None:
+    """"รับข้อเสนอ / Get offers / accept-offer" = user ACCEPTING a broadcast ad
+    offer (promo broadcast), NOT real buying intent — the bot must NOT reply
+    (no pitch, no QR) whether it arrives as plain text OR as a postback."""
+    cases = [
+        {"sender": "txt-thai", "item": {"message": {"mid": "m1", "text": "รับข้อเสนอ"}}},
+        {"sender": "txt-en", "item": {"message": {"mid": "m2", "text": "Get offers"}}},
+        {"sender": "pb-thai", "item": {"postback": {"title": "รับข้อเสนอ", "payload": "OFFER_ACCEPT"}}},
+        {"sender": "pb-en", "item": {"postback": {"title": "Get offers", "payload": "GET_OFFERS"}}},
+    ]
+    for case in cases:
         payload = {
             "object": "page",
             "entry": [
@@ -130,10 +137,10 @@ async def test_offer_accept_postback_is_ignored(client: AsyncClient) -> None:
                     "time": 1720000000,
                     "messaging": [
                         {
-                            "sender": {"id": f"offer-{title}"},
+                            "sender": {"id": case["sender"]},
                             "recipient": {"id": "108433865417846"},
                             "timestamp": 1720000000000,
-                            "postback": {"title": title, "payload": "OFFER_ACCEPT"},
+                            **case["item"],
                         }
                     ],
                 }
@@ -145,8 +152,45 @@ async def test_offer_accept_postback_is_ignored(client: AsyncClient) -> None:
             await client.post("/webhooks/meta", content=body, headers=headers)
         ).status_code == 200
     jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
-    offer_jobs = [j for j in jobs if j.get("payload", {}).get("recipient_id", "").startswith("offer-")]
-    assert offer_jobs == [], "ad offer-accept taps must not trigger any reply"
+    offer_jobs = [j for j in jobs if j.get("payload", {}).get("recipient_id", "") in (
+        "txt-thai", "txt-en", "pb-thai", "pb-en")]
+    assert offer_jobs == [], "offer-accept taps (any shape) must not trigger any reply"
+
+
+@pytest.mark.asyncio
+async def test_normal_text_and_start_postback_still_reply(client: AsyncClient) -> None:
+    """Guards must not over-fire: a real text message and a genuine Get Started
+    tap still enter the funnel and get a reply."""
+    items = [
+        ("txt-real", {"message": {"mid": "r1", "text": "สนใจคอร์ส DCTS ครับ"}}),
+        ("pb-start", {"postback": {"title": "เริ่มต้นใช้งาน", "payload": "GET_STARTED"}}),
+    ]
+    for sender, item in items:
+        payload = {
+            "object": "page",
+            "entry": [
+                {
+                    "id": "108433865417846",
+                    "time": 1720000000,
+                    "messaging": [
+                        {
+                            "sender": {"id": sender},
+                            "recipient": {"id": "108433865417846"},
+                            "timestamp": 1720000000000,
+                            **item,
+                        }
+                    ],
+                }
+            ],
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {"X-Hub-Signature-256": signature(body), "Content-Type": "application/json"}
+        assert (
+            await client.post("/webhooks/meta", content=body, headers=headers)
+        ).status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    mine = [j for j in jobs if j.get("payload", {}).get("recipient_id") in ("txt-real", "pb-start")]
+    assert len(mine) >= 2, f"real intents must be answered, got {len(mine)}"
 
 
 @pytest.mark.asyncio

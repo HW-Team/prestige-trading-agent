@@ -264,21 +264,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 #  2) postback — a button tap ("Get started" / ad CTA).
                 #     Postbacks have NO message.mid, so the old guard silently
                 #     dropped them — those customers never got a reply.
-                #     EXCEPTION: "รับข้อเสนอ / Get offers" (accepting a Meta ad
-                #     offer) is NOT real buying intent — those taps are ignored
-                #     so the bot doesn't pitch/QR-spam offer-accepters.
+                # EXCEPTION (both shapes): "รับข้อเสนอ / Get offers / accept
+                # offer" is the user ACCEPTING a broadcast ad offer (a promo
+                # broadcast the page sent them), NOT real buying intent —
+                # ignore so the bot doesn't pitch/QR-spam offer-accepters.
                 message = item.get("message") or {}
                 sender = str((item.get("sender") or {}).get("id", ""))
                 message_id = str(message.get("mid", ""))
                 postback = item.get("postback")
+                offer_accept = (
+                    "รับข้อเสนอ" in str(message.get("text", ""))
+                    or "get offers" in str(message.get("text", "")).lower()
+                    or "รับข้อเสนอ" in str((postback or {}).get("title", "") or "")
+                    or "get offers" in str((postback or {}).get("title", "") or "").lower()
+                    or "accept" in str((postback or {}).get("payload", "") or "").lower()
+                )
+                if offer_accept:
+                    # Meta ad-offer acceptance (broadcast promo): not real
+                    # interest — skip silently.
+                    continue
                 if postback:
-                    pb_title = str(postback.get("title", "") or "")
-                    pb_payload = str(postback.get("payload", "") or "")
-                    if "รับข้อเสนอ" in pb_title or "get offers" in pb_title.lower():
-                        # Meta ad-offer acceptance: not real interest — skip.
-                        continue
                     message_id = f"postback:{sender}:{item.get('timestamp', '')}"
-                    text = pb_title
+                    text = str(postback.get("title", "") or "")
                     if not text:
                         # Some CTAs carry only a payload (e.g. the ad offer
                         # button) — still answer so the lead isn't dropped.
