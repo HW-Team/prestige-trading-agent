@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -37,7 +37,9 @@ class NextAction(StrEnum):
 
 class OutboxKind(StrEnum):
     SEND_MESSAGE = "send_message"
+    SEND_QR_IMAGE = "send_qr_image"
     SEND_FREE_LINE_INVITE = "send_free_line_invite"
+    SEND_PAID_ROOM = "send_paid_room"
     ENROLL_LMS = "enroll_lms"
     PROVISION_PAID_ACCESS = "provision_paid_access"
     NOTIFY_ACCESS_APPROVED = "notify_access_approved"
@@ -65,6 +67,27 @@ class FormCompletion(BaseModel):
 class ApprovalRequest(BaseModel):
     reviewed_by: str = Field(min_length=1, max_length=255)
     note: str | None = None
+
+
+class FeedbackCreate(BaseModel):
+    message_id: str = Field(min_length=1, max_length=36)
+    rating: Literal["good", "bad", "needs_work"]
+    comment: str | None = Field(default=None, max_length=2000)
+    tester: str | None = Field(default=None, max_length=255)
+
+
+class PaymentRequest(BaseModel):
+    package: Literal["990", "3990"] = "990"
+
+
+class PaymentCheckRequest(BaseModel):
+    package: Literal["990", "3990"] = "990"
+    slip_image_url: str | None = Field(default=None, max_length=2000)
+    expected_amount: str | None = Field(default=None, max_length=20)
+    external_id: str | None = Field(default=None, max_length=255)
+    line_id: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=50)
+    email: str | None = Field(default=None, max_length=255)
 
 
 class ORMResponse(BaseModel):

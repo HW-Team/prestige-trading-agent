@@ -133,3 +133,15 @@ class OutboxJob(TimestampMixin, Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class Feedback(TimestampMixin, Base):
+    """Tester feedback on a single agent reply (test console capture)."""
+
+    __tablename__ = "feedback"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    message_id: Mapped[str] = mapped_column(ForeignKey("messages.id"), index=True)
+    rating: Mapped[str] = mapped_column(String(20))  # e.g. "good" | "bad" | "needs_work"
+    comment: Mapped[str | None] = mapped_column(Text)
+    tester: Mapped[str | None] = mapped_column(String(255))
+    last_error: Mapped[str | None] = mapped_column(Text)

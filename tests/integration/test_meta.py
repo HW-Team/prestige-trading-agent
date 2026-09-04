@@ -85,3 +85,138 @@ async def test_lead_ad_converges_and_invalid_signature_rejected(client: AsyncCli
     ).status_code == 401
     jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
     assert all(job["kind"] != "send_message" for job in jobs)
+
+
+@pytest.mark.asyncio
+async def test_postback_button_tap_gets_reply(client: AsyncClient) -> None:
+    """Regression: a customer tapping a button ("Get started") sends a postback
+    with NO message.mid. The old handler silently skipped it, so that customer
+    never got a reply. A postback must enter the funnel like a normal message."""
+    payload = {
+        "object": "page",
+        "entry": [
+            {
+                "id": "108433865417846",
+                "time": 1720000000,
+                "messaging": [
+                    {
+                        "sender": {"id": "postback-buyer"},
+                        "recipient": {"id": "108433865417846"},
+                        "timestamp": 1720000000000,
+                        "postback": {"title": "เริ่มต้นใช้งาน", "payload": "GET_STARTED"},
+                    }
+                ],
+            }
+        ],
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    headers = {"X-Hub-Signature-256": signature(body), "Content-Type": "application/json"}
+    assert (await client.post("/webhooks/meta", content=body, headers=headers)).status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    mine = [j for j in jobs if j.get("payload", {}).get("recipient_id") == "postback-buyer"]
+    assert any(j["kind"] == "send_message" for j in mine), "postback tap must get a bot reply"
+
+
+@pytest.mark.asyncio
+async def test_offer_accept_is_ignored_all_shapes(client: AsyncClient) -> None:
+    """"รับข้อเสนอ / Get offers / accept-offer" = user ACCEPTING a broadcast ad
+    offer (promo broadcast), NOT real buying intent — the bot must NOT reply
+    (no pitch, no QR) whether it arrives as plain text OR as a postback."""
+    cases = [
+        {"sender": "txt-thai", "item": {"message": {"mid": "m1", "text": "รับข้อเสนอ"}}},
+        {"sender": "txt-en", "item": {"message": {"mid": "m2", "text": "Get offers"}}},
+        {"sender": "pb-thai", "item": {"postback": {"title": "รับข้อเสนอ", "payload": "OFFER_ACCEPT"}}},
+        {"sender": "pb-en", "item": {"postback": {"title": "Get offers", "payload": "GET_OFFERS"}}},
+    ]
+    for case in cases:
+        payload = {
+            "object": "page",
+            "entry": [
+                {
+                    "id": "108433865417846",
+                    "time": 1720000000,
+                    "messaging": [
+                        {
+                            "sender": {"id": case["sender"]},
+                            "recipient": {"id": "108433865417846"},
+                            "timestamp": 1720000000000,
+                            **case["item"],
+                        }
+                    ],
+                }
+            ],
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {"X-Hub-Signature-256": signature(body), "Content-Type": "application/json"}
+        assert (
+            await client.post("/webhooks/meta", content=body, headers=headers)
+        ).status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    offer_jobs = [j for j in jobs if j.get("payload", {}).get("recipient_id", "") in (
+        "txt-thai", "txt-en", "pb-thai", "pb-en")]
+    assert offer_jobs == [], "offer-accept taps (any shape) must not trigger any reply"
+
+
+@pytest.mark.asyncio
+async def test_normal_text_and_start_postback_still_reply(client: AsyncClient) -> None:
+    """Guards must not over-fire: a real text message and a genuine Get Started
+    tap still enter the funnel and get a reply."""
+    items = [
+        ("txt-real", {"message": {"mid": "r1", "text": "สนใจคอร์ส DCTS ครับ"}}),
+        ("pb-start", {"postback": {"title": "เริ่มต้นใช้งาน", "payload": "GET_STARTED"}}),
+    ]
+    for sender, item in items:
+        payload = {
+            "object": "page",
+            "entry": [
+                {
+                    "id": "108433865417846",
+                    "time": 1720000000,
+                    "messaging": [
+                        {
+                            "sender": {"id": sender},
+                            "recipient": {"id": "108433865417846"},
+                            "timestamp": 1720000000000,
+                            **item,
+                        }
+                    ],
+                }
+            ],
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {"X-Hub-Signature-256": signature(body), "Content-Type": "application/json"}
+        assert (
+            await client.post("/webhooks/meta", content=body, headers=headers)
+        ).status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    mine = [j for j in jobs if j.get("payload", {}).get("recipient_id") in ("txt-real", "pb-start")]
+    assert len(mine) >= 2, f"real intents must be answered, got {len(mine)}"
+
+
+@pytest.mark.asyncio
+async def test_postback_with_only_payload_still_gets_reply(client: AsyncClient) -> None:
+    """Ad-offer CTAs can send a postback with only a payload (no title). The
+    lead must not be dropped silently."""
+    payload = {
+        "object": "page",
+        "entry": [
+            {
+                "id": "108433865417846",
+                "time": 1720000000,
+                "messaging": [
+                    {
+                        "sender": {"id": "payload-buyer"},
+                        "recipient": {"id": "108433865417846"},
+                        "timestamp": 1720000000000,
+                        "postback": {"payload": "OFFER_990"},
+                    }
+                ],
+            }
+        ],
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    headers = {"X-Hub-Signature-256": signature(body), "Content-Type": "application/json"}
+    assert (await client.post("/webhooks/meta", content=body, headers=headers)).status_code == 200
+    jobs = (await client.get("/admin/outbox", headers={"X-API-Key": "admin-test"})).json()
+    mine = [j for j in jobs if j.get("payload", {}).get("recipient_id") == "payload-buyer"]
+    assert any(j["kind"] == "send_message" for j in mine), "payload-only postback must still reply"
