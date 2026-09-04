@@ -259,9 +259,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         duplicates = 0
         for entry in payload.get("entry", []):
             for item in entry.get("messaging", []):
+                # Two event shapes carry user intent into the funnel:
+                #  1) message  — a text/image the customer typed (has a mid)
+                #  2) postback — a button tap ("Get started" / "รับข้อเสนอ" /
+                #     ad offer CTA). Postbacks have NO message.mid, so the old
+                #     guard silently dropped them — those customers never got
+                #     a reply. Treat a postback as a normal funnel message.
                 message = item.get("message") or {}
                 sender = str((item.get("sender") or {}).get("id", ""))
                 message_id = str(message.get("mid", ""))
+                if item.get("postback"):
+                    message_id = f"postback:{sender}:{item.get('timestamp', '')}"
+                    text = str((item.get("postback") or {}).get("title", "") or "")
+                    if not text:
+                        # Some CTAs carry only a payload (e.g. the ad offer
+                        # button) — still answer so the lead isn't dropped.
+                        text = "สนใจข้อเสนอครับ"
+                else:
+                    text = str(message.get("text", ""))
                 if not sender or not message_id or message.get("is_echo"):
                     continue
                 _, duplicate, _ = await ingest_message(
@@ -269,7 +284,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     agent,
                     external_id=sender,
                     message_id=message_id,
-                    text=str(message.get("text", "")),
+                    text=text,
                     source="meta_organic",
                     source_id=sender,
                 )
