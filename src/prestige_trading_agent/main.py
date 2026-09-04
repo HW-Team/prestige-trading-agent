@@ -167,6 +167,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await session.execute(text("SELECT 1"))
         return {"status": "ready"}
 
+    # Serve dynamic generated QRs FIRST so /assets/qr-*.png never gets shadowed
+    # by the static mount below (which only holds qr-990/qr-3990 from the repo).
+    @app.get("/assets/qr-{package}.png", include_in_schema=False)
+    async def generated_qr(package: str) -> Response:
+        qr_file = data_qr_dir / f"qr-{package}.png"
+        if not qr_file.is_file():
+            raise HTTPException(status_code=404, detail="QR not generated yet")
+        return Response(content=qr_file.read_bytes(), media_type="image/png")
+
     # Serve static assets (payment QR, test console) from web/.
     assets_dir = (
         Path(__file__).resolve().parent.parent.parent / "web" / "agent-test-console" / "assets"
@@ -178,14 +187,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     data_qr_dir = Path("/data")
     if data_qr_dir.is_dir():
         app.mount("/data", StaticFiles(directory=str(data_qr_dir)), name="data")
-
-    # Also expose generated QRs at /assets/qr-*.png for the public base URL.
-    @app.get("/assets/qr-{package}.png", include_in_schema=False)
-    async def generated_qr(package: str) -> Response:
-        qr_file = data_qr_dir / f"qr-{package}.png"
-        if not qr_file.is_file():
-            raise HTTPException(status_code=404, detail="QR not generated yet")
-        return Response(content=qr_file.read_bytes(), media_type="image/png")
 
     @app.get("/test", include_in_schema=False)
     async def test_console() -> Response:
